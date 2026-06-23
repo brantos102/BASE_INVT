@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  
+  <style>
+    :root { 
+      --primary: #263238; --secondary: #37474f; --accent: #0277bd; --bg: #eceff1; 
+      --surface: #ffffff; --border: #cfd8dc; --success: #2e7d32; --warning: #f9a825; 
+      --danger: #c62828; --orange: #ef6c00; --font-ui: 'Segoe UI', system-ui, sans-serif; --font-data: 'Roboto Mono', 'Consolas', monospace; 
+    }
+    body { font-family: var(--font-ui); background: var(--bg); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; color: #263238; font-size: 13px; }
+    
+    header { background: var(--primary); color: white; padding: 0 15px; height: 50px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index:10;}
+    h2 { margin: 0; font-size: 1rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    
+    .header-widgets { display:flex; align-items:center; gap: 12px; }
+    .widget-box { background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight:bold; }
+    #userDisplay { color: #81d4fa; }
+    
+    .progress-wrapper { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-right: 5px;}
+    .progress-bar-bg { width: 120px; height: 6px; background: #546e7a; border-radius: 3px; overflow: hidden; margin-bottom: 2px;}
+    .progress-bar-fill { height: 100%; background: var(--success); width: 0%; transition: width 0.5s ease-in-out;}
+    .progress-text { font-size: 9px; color: #b0bec5; font-weight: bold; letter-spacing: 0.5px;}
+
+    .sync-spin { animation: spin 1s linear infinite; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); height: 40px; flex-shrink: 0; }
+    .tab { flex: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: 600; color: #78909c; border-bottom: 3px solid transparent; transition: all 0.2s; font-size: 11px; text-transform: uppercase; }
+    .tab:hover { background: #f5f5f5; color: var(--accent); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: #fdfdfd; }
+    .tab .material-icons { margin-right: 6px; font-size: 16px; }
+
+    .content { flex: 1; padding: 10px; overflow-y: auto; position: relative; }
+    .page { display: none; height: 100%; flex-direction: column; }
+    .page.active { display: flex; }
+    .card { background: var(--surface); padding: 12px; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); border: 1px solid var(--border); margin-bottom: 10px; display: flex; flex-direction: column; }
+    
+    input, select { width: 100%; padding: 8px 10px; border: 1px solid #b0bec5; border-radius: 3px; font-family: var(--font-data); font-size: 13px; color: var(--primary); box-sizing: border-box; }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(2, 119, 189, 0.1); outline: none; }
+    input[readonly] { background: #f5f5f5; color: #546e7a; border-color: #cfd8dc; }
+
+    button { padding: 8px 14px; border: none; border-radius: 3px; font-weight: 600; cursor: pointer; transition: background 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--font-ui); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    button:disabled { background: #cfd8dc !important; cursor: not-allowed; color: #90a4ae; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-success { background: var(--success); color: white; }
+    .btn-neutral { background: #eceff1; color: var(--secondary); border: 1px solid #cfd8dc; }
+
+    .table-wrapper { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 3px; background: white; }
+    table { width: 100%; border-collapse: collapse; min-width: 950px; }
+    th { background: #f1f3f4; color: #455a64; font-weight: 700; font-size: 10px; text-transform: uppercase; padding: 10px 8px; text-align: left; position: sticky; top: 0; z-index: 5; border-bottom: 2px solid var(--border); }
+    td { padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 11px; vertical-align: middle; }
+    tr:hover { background-color: #f9fafb; }
+    
+    .row-correct { background-color: #f1f8e9; border-left: 3px solid var(--success); } 
+    .row-correct td { color: #78909c; } 
+    .row-error { background-color: #ffebee; border-left: 3px solid var(--danger); }
+    .row-pending { border-left: 3px solid transparent; }
+
+    .data-mono { font-family: var(--font-data); }
+    .badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; border: 1px solid rgba(0,0,0,0.1); }
+    .badge-ok { background: #e8f5e9; color: var(--success); }
+    .badge-err { background: #ffebee; color: var(--danger); }
+    .badge-neutral { background: #eceff1; color: #546e7a; }
+
+    .info-col { display: none; } 
+    .group-header { background-color: #e3f2fd !important; color: #0277bd !important; border-bottom: 3px solid #0277bd !important;}
+    .info-cell { background-color: #f4f9fd; border-right: 1px solid #e1eef6;}
+    .depot-col { display: none; } 
+
+    .kpi-card { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 15px; flex: 1; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-top: 4px solid var(--accent); display:flex; flex-direction:column; justify-content:space-between; }
+    .kpi-value { font-size: 24px; font-weight: bold; color: var(--primary); margin: 5px 0; }
+    .kpi-title { font-size: 11px; color: #546e7a; text-transform: uppercase; font-weight: 600; }
+
+    /* LAYOUT MATRIX (RACKS HORIZONTALES RESTAURADOS CON FILTRO INTELIGENTE) */
+    .rack-map { display: flex; gap: 20px; padding: 10px; flex-wrap: nowrap; align-items: flex-end;}
+    .rack-block { border: 1px solid #cfd8dc; border-radius: 4px; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .rack-title { background: var(--secondary); color: white; text-align: center; font-size: 10px; font-weight: bold; padding: 4px; border-top-left-radius: 3px; border-top-right-radius: 3px;}
+    .rack-grid { border-collapse: separate; border-spacing: 3px; padding: 5px; }
+    
+    .rack-cell { width: 20px; height: 20px; border-radius: 3px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+    .rack-cell:hover { transform: scale(1.15); box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 2; position: relative;}
+    .rack-empty { width: 20px; height: 20px; border-radius: 3px; border: 1px dashed #cfd8dc; background: #f5f5f5; }
+    .rack-axis { font-size: 8px; color: #90a4ae; text-align: center; font-weight: bold; padding: 1px;}
+
+    /* VISTA LISTA / TABLA EN HOME */
+    .home-table-container { width: 100%; border: 1px solid #eee; border-radius: 4px; overflow-y: auto; height: 100%; }
+    .home-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+    .home-table th { background: #eceff1; padding: 8px; border-bottom: 2px solid #cfd8dc; position: sticky; top: 0; z-index: 2; cursor: pointer; user-select: none; }
+    .home-table th:hover { background: #e0e0e0; }
+    .home-table td { padding: 8px; border-bottom: 1px solid #eee; vertical-align:middle; }
+    .home-table tr:hover { background: #f5f7f8; cursor: pointer; }
+    .sort-indicator { font-size: 12px; vertical-align: middle; color: var(--accent); margin-left: 2px; }
+    
+    .modal-overlay { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(38, 50, 56, 0.6); display: none; align-items: center; justify-content: center; z-index: 9000; }
+    .modal-box { background: white; padding: 20px; border-radius: 4px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); border-top: 4px solid var(--accent); }
+    #toast { visibility: hidden; min-width: 200px; background-color: var(--secondary); color: #fff; text-align: center; border-radius: 4px; padding: 10px; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 9500; font-weight: 500; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+    #toast.show { visibility: visible; animation: fadein 0.3s, fadeout 0.3s 2.5s; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h2><span class="material-icons">inventory_2</span> TERMINAL WMS <span id="userDisplay">Usuario</span></h2>
+    <div class="header-widgets">
+        <div class="progress-wrapper">
+           <div class="progress-bar-bg"><div id="barAvance" class="progress-bar-fill"></div></div>
+           <div id="txtAvance" class="progress-text">AVANCE: 0%</div>
+        </div>
+        <div class="widget-box" title="Operarios Conectados">
+            <span class="material-icons" style="font-size:14px; color:#81d4fa;">group</span>
+            <span id="activeUsersCount">1</span>
+        </div>
+        <div class="widget-box">
+            <span class="material-icons" style="font-size:14px; color:#a5d6a7;">schedule</span>
+            <span id="liveClock">00:00:00</span>
+        </div>
+        <div id="syncStatus"><span class="material-icons sync-spin" style="font-size:14px">sync</span></div>
+        <div id="posDisplay" class="data-mono widget-box" style="margin-left:5px;">---</div>
+    </div>
+  </header>
+
+  <div id="modalLogin" class="modal-overlay" style="display:flex;">
+    <div class="modal-box">
+      <h3>INICIO DE SESIÓN</h3><label>Seleccione Operario:</label>
+      <select id="userSelector" class="data-mono" style="padding:10px; margin:10px 0; width:100%;"></select>
+      <button class="btn-success" onclick="confirmarUsuario()" style="width:100%">INGRESAR</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="nav('home')"><span class="material-icons">dashboard</span> INICIO</div>
+    <div class="tab" onclick="nav('count')" id="tabCount"><span class="material-icons">checklist</span> CONTEO FÍSICO </div>
+    <div class="tab" onclick="nav('series')"><span class="material-icons">qr_code_scanner</span> SERIES</div>
+    <div class="tab" onclick="nav('analysis')"><span class="material-icons">analytics</span> ANÁLISIS</div>
+    <div class="tab" onclick="nav('alt')"><span class="material-icons">edit_note</span> ADICIONALES</div>
+  </div>
+
+  <div class="content">
+    
+    <div id="page-home" class="page active">
+      <div style="display:grid; grid-template-columns: 1fr 2.5fr; gap:10px; height:100%;">
+        <div class="card">
+          <h3 style="margin-top:0; font-size:12px; color:var(--secondary); border-bottom:1px solid #eee; padding-bottom:8px;">BÚSQUEDA SKU</h3>
+          <div style="display:flex; gap:5px; margin-bottom:10px;"><input type="text" id="searchSku" placeholder="Escanear..." onkeyup="if(event.key==='Enter') searchBySku()"><button class="btn-primary" onclick="searchBySku()"><span class="material-icons">search</span></button></div>
+          <div id="skuResults" style="flex:1; overflow-y:auto; border:1px solid #eee; padding:5px; background:#fafafa;"><div style="color:#999; text-align:center; padding:20px; font-size:12px;">Resultados aquí</div></div>
+        </div>
+        
+        <div class="card" style="display:flex; flex-direction:column; overflow:hidden; padding:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:8px; margin-bottom:8px;">
+             <h3 style="margin:0; font-size:12px; color:var(--secondary);">MAPA DE RACKS Y UBICACIONES</h3>
+             <div id="tableFilters" style="display:flex; gap:5px; align-items:center;">
+                 <input type="text" id="fltNave" placeholder="Nave..." oninput="filterPositions()" style="width:60px; padding:6px; font-size:11px;">
+                 <input type="text" id="fltRack" placeholder="Lit..." oninput="filterPositions()" style="width:50px; padding:6px; font-size:11px;">
+                 <input type="text" id="fltCol" placeholder="Col..." oninput="filterPositions()" style="width:40px; padding:6px; font-size:11px;">
+                 <input type="text" id="fltNiv" placeholder="Niv..." oninput="filterPositions()" style="width:40px; padding:6px; font-size:11px;">
+                 <button class="btn-neutral" onclick="clearFilters()" title="Limpiar Filtros" style="padding:4px 6px;"><span class="material-icons" style="font-size:14px; color:var(--danger)">clear</span></button>
+             </div>
+          </div>
+          
+          <div id="rackMapContainer" style="overflow-x:auto; overflow-y:hidden; padding-bottom:15px; border-bottom:2px solid #eceff1; margin-bottom:10px;">
+              <div style="color:#999; text-align:center; padding:10px;">Cargando Mapa de Racks...</div>
+          </div>
+
+          <div id="posTableContainer" style="flex:1; overflow-y:auto; overflow-x:hidden;">
+              <div style="color:#999; text-align:center; padding:10px;">Cargando Tabla...</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div id="page-count" class="page">
+      <div class="card" style="flex-direction:row; align-items:flex-end; gap:10px; padding:10px; margin-bottom:8px;">
+        <div style="flex:3;"><label style="font-size:10px; font-weight:bold; color:#78909c;">ITEM / EAN</label>
+        <input type="text" id="quickSku" class="data-mono" placeholder="Escanear Código..." style="font-size:14px; border:1px solid var(--accent);" onkeydown="handleQuickScan(event)"></div>
+        <div style="flex:1;"><label style="font-size:10px; font-weight:bold; color:#78909c;">CANT</label>
+        <input type="number" id="quickQty" value="1" style="text-align:center; font-weight:bold;"></div>
+        <button class="btn-success" onclick="triggerQuickScan()" style="height:35px;"><span class="material-icons">add</span></button>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div style="display:flex; gap:10px; align-items:center;">
+            <label style="font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="checkbox" id="toggleCorrect" onchange="renderTableData()" style="width:auto;"> Ocultar Correctos</label>
+            <label style="font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer; color:var(--accent); font-weight:bold; background:#e3f2fd; padding:4px 8px; border-radius:4px;"><input type="checkbox" id="toggleInfo" onchange="applyInfoVisibility()" style="width:auto;"> + Detalles</label>
+            <button class="btn-neutral" onclick="loadCountTable()">Actualizar</button>
+        </div>
+        <div style="display:flex; gap:5px; align-items:center;">
+            <button class="btn-primary" onclick="saveMultiple()">Guardar Sel.</button>
+            <span id="btnEyeDepot" onclick="toggleDepot()" title="Revelar/Ocultar Cantidad DEPOT (Ciego)" class="material-icons" style="font-size:20px; color:#b0bec5; cursor:pointer; margin-left:8px; transition:0.2s;" onmouseover="this.style.color='#0277bd'" onmouseout="if(!DEPOT_OPEN)this.style.color='#b0bec5'">visibility_off</span>
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <div id="loadingCount" style="display:none; text-align:center; padding:20px; color:var(--accent);">Cargando inventario...</div>
+        <table id="invTable">
+          <thead>
+            <tr>
+              <th width="30"><input type="checkbox" onclick="toggleAll(this)" style="width:auto;"></th>
+              <th onclick="sortCountTable('codigo')">SKU <span id="sort-codigo"></span></th>
+              <th onclick="sortCountTable('desc')">Descripción <span id="sort-desc"></span></th>
+              <th class="info-col group-header">Serie</th>
+              <th class="info-col group-header">Lote</th>
+              <th class="info-col group-header">N. Despacho</th>
+              <th class="info-col group-header">N. Partida</th>
+              <th>Est.</th>
+              <th>Cat_Log</th>
+              <th class="depot-col" style="color:var(--accent);">Depot</th>
+              <th onclick="sortCountTable('estado')">Status <span id="sort-estado"></span></th>
+              <th>Historial</th>
+              <th width="60">Cant</th>
+              <th width="100">Obs</th>
+              <th width="40"></th>
+            </tr>
+          </thead>
+          <tbody id="invBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="page-series" class="page">
+      <div class="card" style="border-left: 4px solid var(--accent);">
+         <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; background: #f5f7f8; padding: 10px; border-radius: 4px;">
+            <div><label style="font-size:10px; font-weight:700; color:#78909c;">Origen Detectado</label><input id="displayOrigin" class="data-mono" readonly placeholder="---" style="background:#e0e0e0; border:none;"></div>
+            <div><label style="font-size:10px; font-weight:700; color:var(--accent);">Destino Final</label><input id="targetPos" class="data-mono" placeholder="Escanear..." style="font-weight:bold; border-color:var(--accent);"></div>
+         </div>
+         <div style="text-align:center; margin-bottom:10px;">
+             <input id="scanInput" class="data-mono" placeholder="ESCANEAR SERIE (RÁFAGA)" style="font-size:16px; text-align:center; padding:12px; border:2px solid var(--primary);" onkeydown="handleSeriesScan(event)">
+         </div>
+         <button class="btn-success" style="width:100%; padding:12px;" onclick="iniciarFlujoProcesoSeries()"><span class="material-icons">send</span> PROCESAR Y MOVER</button>
+      </div>
+
+      <div class="card" style="flex:1; display:flex; flex-direction:column; padding:0;">
+         <div style="padding:10px; background:#f1f3f4; border-bottom:1px solid #ddd; display:flex; justify-content:space-between; align-items:center;">
+            <strong style="font-size:12px; color:#455a64;">REGISTROS PENDIENTES DE PROCESO (<span id="cntBadge">0</span>)</strong>
+            <div style="display:flex; gap:5px;"><button class="btn-neutral" onclick="loadSeriesHistory()">Cargar Historial Base</button><button class="btn-neutral" onclick="clearSeries()">Limpiar Visor</button></div>
+         </div>
+         <div id="seriesList" style="flex:1; overflow-y:auto;"><div style="padding:20px; text-align:center; color:#b0bec5;">Listo para escanear</div></div>
+      </div>
+    </div>
+
+    <div id="page-analysis" class="page">
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+         <div class="kpi-card">
+            <div class="kpi-title">Efectividad Unidades</div><div class="kpi-value" id="kpi-uni">0%</div>
+            <div style="width:100%; background:#e0e0e0; height:6px; border-radius:3px; margin: 8px 0 4px 0;"><div id="bar-uni" style="width:0%; background:var(--accent); height:100%; border-radius:3px; transition: 0.5s;"></div></div>
+            <div class="kpi-title" id="sub-uni" style="font-size:9px; text-transform:none;">0 Avanzadas | 0 Pendientes</div>
+         </div>
+         <div class="kpi-card">
+            <div class="kpi-title">Efectividad Referencias</div><div class="kpi-value" id="kpi-ref">0%</div>
+            <div style="width:100%; background:#e0e0e0; height:6px; border-radius:3px; margin: 8px 0 4px 0;"><div id="bar-ref" style="width:0%; background:var(--accent); height:100%; border-radius:3px; transition: 0.5s;"></div></div>
+            <div class="kpi-title" id="sub-ref" style="font-size:9px; text-transform:none;">0 Avanzadas | 0 Pendientes</div>
+         </div>
+         <div class="kpi-card">
+            <div class="kpi-title">Efectividad Posiciones</div><div class="kpi-value" id="kpi-pos">0%</div>
+            <div style="width:100%; background:#e0e0e0; height:6px; border-radius:3px; margin: 8px 0 4px 0;"><div id="bar-pos" style="width:0%; background:var(--accent); height:100%; border-radius:3px; transition: 0.5s;"></div></div>
+            <div class="kpi-title" id="sub-pos" style="font-size:9px; text-transform:none;">0 Avanzadas | 0 Pendientes</div>
+         </div>
+         <button class="btn-neutral" style="height:auto; align-self:stretch;" onclick="loadAnalysis()"><span class="material-icons">refresh</span></button>
+      </div>
+      <div class="table-wrapper">
+         <div id="loadingAnalysis" style="text-align:center; padding:20px; color:#999; display:none;">Calculando métricas...</div>
+         <table id="tblAnalysis">
+            <thead>
+               <tr><th>POSICIÓN</th><th>SKU</th><th>DESCRIPCIÓN</th><th>TIPO ERROR</th><th style="text-align:center">TEÓRICA</th><th style="text-align:center">FÍSICA</th><th style="text-align:center">DESFASE</th><th>ACCIÓN</th></tr>
+            </thead>
+            <tbody id="bodyAnalysis"></tbody>
+         </table>
+      </div>
+    </div>
+
+    <div id="page-alt" class="page">
+        <div class="card" style="max-width:600px; margin:20px auto;">
+            <h3 style="border-bottom:1px solid #eee; padding-bottom:10px;">Planilla Alterna</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div style="grid-column:span 2"><label style="font-size:10px;">POSICIÓN</label><input id="altPos" readonly class="data-mono" style="font-weight:bold;"></div>
+                <div><label style="font-size:10px;">SKU *</label><input id="altCod" class="data-mono"></div>
+                <div><label style="font-size:10px;">CANTIDAD *</label><input type="number" id="altCant" class="data-mono" value="1"></div>
+                <div style="grid-column:span 2"><label style="font-size:10px;">DESCRIPCIÓN</label><input id="altDesc"></div>
+                <div><label style="font-size:10px;">LOTE</label><input id="altLote"></div>
+                <div><label style="font-size:10px;">SERIE</label><input id="altSerie"></div>
+                <div><label style="font-size:10px;">OBSERVACIÓN</label><input id="altObs"></div>
+                <div style="grid-column:span 2"><label style="font-size:10px;">JUSTIFICACIÓN</label><select id="altJust"><option>Mercadería no en sistema</option><option>Ubicación Incorrecta</option></select></div>
+            </div>
+            <div style="margin-top:15px; text-align:right;"><button class="btn-success" onclick="saveAlterna()">GUARDAR REGISTRO</button></div>
+        </div>
+    </div>
+
+  </div> <div id="toast">Notificación</div>
+  
+  <div id="modalHallazgoBatch" class="modal-overlay"><div class="modal-box"><h3>Hallazgo de Serie</h3><label>SKU</label><input id="hzSku"><label>Desc</label><input id="hzDesc"><label>Justif.</label><select id="hzJust"><option>Mercadería no en sistema</option></select><div style="margin-top:10px; display:flex; gap:10px;"><button class="btn-success" onclick="confirmarHallazgoBatch()" style="flex:1">Guardar</button><button class="btn-neutral" onclick="cerrarModalHallazgoBatch()" style="flex:1;">Cancelar</button></div></div></div>
+  <div id="modalAjuste" class="modal-overlay"><div class="modal-box"><h3 style="border-bottom:1px solid #eee; padding-bottom:10px; margin-top:0;"><span class="material-icons" style="vertical-align:bottom; color:var(--orange);">build</span> Ajuste de Inventario</h3><div class="tech-note"><strong>NOTA:</strong> SOBRANTE: <b>-NEGATIVO</b> | FALTANTE: <b>+POSITIVO</b></div><div style="margin-bottom:10px;"><label style="font-size:11px; font-weight:bold; color:#555;">MOTIVO</label><select id="adjMotivo"></select></div><div style="margin-bottom:10px;"><label style="font-size:11px; font-weight:bold; color:#555;">CANT A AJUSTAR (Col Y)</label><input type="number" id="adjQty" class="data-mono" placeholder="+ / -" style="font-weight:bold; border-color:var(--accent);"></div><div style="margin-bottom:15px;"><label style="font-size:11px; font-weight:bold; color:#555;">JUSTIFICACIÓN</label><select id="adjJustificacion"></select></div><input type="hidden" id="adjRowId"><div style="display:flex; gap:10px;"><button class="btn-success" onclick="confirmarAjuste()" style="flex:1">APLICAR</button><button class="btn-neutral" onclick="cerrarModalAjuste()" style="flex:1;">CANCELAR</button></div></div></div>
+
+  <script>
+    let USER_EMAIL = ""; 
+    let CURRENT_POS = "", ALL_POS = [];
+    let TABLE_DATA = [], SERIES_DATA = [];
+    let INFO_OPEN = false, DEPOT_OPEN = false; 
+    let CONFIG_COUNT = { sortKey: 'estado', sortAsc: true }; 
+    let HOME_SORT_CONFIG = { key: 'prioridad', asc: true }; 
+    let PROCESSING_QUEUE = [], IS_PROCESSING_BG = false;
+    let UNSAVED_ROWS = {}; 
+    let IS_USER_TYPING = false; 
+    let LOCAL_LAST_UPDATE = 0; 
+
+    const MOTIVOS_LIST = ["UBICACION ERRONEA", "INGRESO NO REGISTRADO", "ERROR DE ETIQUETADO", "CODIGO CRUZADO", "MOTIVO SIN DEFINIR", "EGRESO NO REGISTRADO", "DIF_INVENTARIO", "OMISION DE INGRESO", "OMISION DE EGRESO", "OMISION DE CONTEO", "REUBICACION NO REGISTRADA"];
+    const JUSTIF_LIST = ["PENDIENTE GESTION ADM", "PENDIENTE GESTION CLIENTE", "AJUSTE DE ALTA", "AJUSTE DE BAJA", "MAL. UB X DESPACHO", "MAL. UB X INGRESOS", "MOVIMIENTOS NO REGISTRADOS", "ACTUALIZACION DE UBICACION EN SISTEMAS", "INVENTARIO CUADRADO"];
+
+    setInterval(() => { document.getElementById('liveClock').innerText = new Date().toLocaleTimeString('es-EC', {hour12: false}); }, 1000);
+
+    // --- POLLING INTELIGENTE ---
+    setInterval(() => {
+        if (IS_USER_TYPING) return; 
+
+        let reqType = '';
+        if (document.getElementById('page-home').classList.contains('active')) reqType = 'HOME';
+        else if (document.getElementById('page-count').classList.contains('active') && CURRENT_POS) reqType = 'COUNT';
+        else if (document.getElementById('page-analysis').classList.contains('active')) reqType = 'ANALYSIS';
+
+        google.script.run.withSuccessHandler(res => {
+            if (res.activeUsers) {
+                document.getElementById('activeUsersCount').innerText = res.activeUsers.length;
+                document.getElementById('activeUsersCount').title = res.activeUsers.join("\n");
+            }
+            if (res.unchanged) return; 
+
+            LOCAL_LAST_UPDATE = res.serverLastUpdate; 
+            if (!res.data || !res.data.exito) return;
+            
+            if (reqType === 'HOME') {
+                ALL_POS = res.data.posiciones; filterPositions(); 
+                actualizarBarraProgreso(res.data.avance, res.data.textoAvance);
+            } else if (reqType === 'COUNT') {
+                TABLE_DATA = res.data.items; renderTableData(); 
+            } else if (reqType === 'ANALYSIS') {
+                renderAnalysis(res.data);
+            }
+        }).pollRealTime(CURRENT_POS, USER_EMAIL, reqType, LOCAL_LAST_UPDATE);
+    }, 12000); 
+
+    window.onload = function() {
+      const mSel = document.getElementById('adjMotivo'); const jSel = document.getElementById('adjJustificacion');
+      MOTIVOS_LIST.forEach(m => mSel.add(new Option(m,m))); JUSTIF_LIST.forEach(j => jSel.add(new Option(j,j)));
+
+      google.script.run.withSuccessHandler(llenarUsuarios).obtenerConfiguracionUsuarios();
+      google.script.run.withSuccessHandler(r => { if(r.exito){ ALL_POS=r.posiciones; filterPositions(); actualizarBarraProgreso(r.avance, r.textoAvance); } }).obtenerDatosIniciales();
+    };
+
+    function llenarUsuarios(lista) {
+      const sel = document.getElementById('userSelector');
+      sel.innerHTML = "<option value='' disabled selected>-- Busque su nombre --</option>";
+      lista.forEach(u => { let opt = document.createElement('option'); opt.value = u.email; opt.text = u.nombre; sel.add(opt); });
+    }
+
+    function confirmarUsuario() {
+      const el = document.getElementById('userSelector');
+      if(!el.value) return Swal.fire("Error", "Seleccione un usuario", "error");
+      USER_EMAIL = el.value; document.getElementById('modalLogin').style.display = 'none';
+      document.getElementById('userDisplay').innerText = el.options[el.selectedIndex].text; document.getElementById('userDisplay').style.display = "inline-block";
+      showToast("Bienvenido: " + el.options[el.selectedIndex].text);
+      google.script.run.pollRealTime("", USER_EMAIL, "", 0); 
+    }
+
+    function actualizarBarraProgreso(pct, texto) {
+      document.getElementById('barAvance').style.width = pct + "%";
+      document.getElementById('txtAvance').innerText = `AVANCE: ${pct}% (${texto})`;
+      if(pct === 100) document.getElementById('barAvance').style.background = "#2196f3";
+    }
+
+    function nav(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('page-'+page).classList.add('active');
+      const idx = ['home','count','series','analysis','alt'].indexOf(page);
+      document.querySelectorAll('.tab')[idx].classList.add('active');
+      
+      document.getElementById('posDisplay').innerText = CURRENT_POS || "---";
+      if(CURRENT_POS) { document.getElementById('altPos').value = CURRENT_POS; if(!document.getElementById('targetPos').value) document.getElementById('targetPos').value = CURRENT_POS; }
+
+      if(page === 'count') setTimeout(()=> document.getElementById('quickSku').focus(), 300);
+      if(page === 'series') {
+         setTimeout(()=> document.getElementById('scanInput').focus(), 300); 
+         if (!SERIES_DATA.some(i => i.type === 'new')) loadSeriesHistory();
+      }
+      if(page === 'analysis') loadAnalysis();
+    }
+
+    function showToast(msg) { const t = document.getElementById("toast"); t.innerText = msg; t.className = "show"; setTimeout(()=>{ t.className = t.className.replace("show", ""); }, 3000); }
+
+    function selectPos() { if(!CURRENT_POS) return; nav('count'); loadCountTable(); }
+    
+    function loadCountTable() {
+       document.getElementById('loadingCount').style.display='block'; document.getElementById('invBody').innerHTML = "";
+       google.script.run.withSuccessHandler(res => {
+          document.getElementById('loadingCount').style.display='none';
+          TABLE_DATA = res.items; renderTableData();
+       }).obtenerDatosPosicion(CURRENT_POS);
+    }
+
+    function applyInfoVisibility() { INFO_OPEN = document.getElementById('toggleInfo').checked; document.querySelectorAll('.info-col').forEach(c => c.style.display = INFO_OPEN ? 'table-cell' : 'none'); }
+    function toggleDepot() { 
+       DEPOT_OPEN = !DEPOT_OPEN; 
+       document.querySelectorAll('.depot-col').forEach(c => c.style.display = DEPOT_OPEN ? 'table-cell' : 'none'); 
+       const icon = document.getElementById('btnEyeDepot'); 
+       if(icon) { icon.innerText = DEPOT_OPEN ? 'visibility' : 'visibility_off'; icon.style.color = DEPOT_OPEN ? 'var(--accent)' : '#b0bec5'; }
+       showToast(DEPOT_OPEN ? "Cantidades Reveladas" : "Modo Conteo Ciego"); 
+    }
+
+    function renderTableData() {
+      const tbody = document.getElementById('invBody'); tbody.innerHTML = "";
+      const hideCorrect = document.getElementById('toggleCorrect').checked; 
+
+      let displayData = TABLE_DATA.filter(item => !(hideCorrect && item.estado === "CORRECTO"));
+      displayData.sort((a, b) => {
+         if (a.estado === "CORRECTO" && b.estado !== "CORRECTO") return 1; 
+         if (a.estado !== "CORRECTO" && b.estado === "CORRECTO") return -1;
+         let valA = String(a[CONFIG_COUNT.sortKey]||"").toLowerCase(), valB = String(b[CONFIG_COUNT.sortKey]||"").toLowerCase();
+         if (valA < valB) return CONFIG_COUNT.sortAsc ? -1 : 1; if (valA > valB) return CONFIG_COUNT.sortAsc ? 1 : -1; return 0;
+      });
+
+      if(displayData.length === 0) { tbody.innerHTML = "<tr><td colspan='15' style='text-align:center; padding:20px; color:#999;'>Sin registros visibles</td></tr>"; return; }
+      
+      displayData.forEach(item => {
+          const tr = document.createElement('tr'); tr.id = "row-" + item.row;
+          tr.className = item.estado === "CORRECTO" ? "row-correct" : (["FALTANTE","SOBRANTE"].includes(item.estado) ? "row-error" : "row-pending");
+          
+          let pendingVal = UNSAVED_ROWS[item.row] ? UNSAVED_ROWS[item.row].qty : "";
+          let pendingObs = UNSAVED_ROWS[item.row] ? UNSAVED_ROWS[item.row].obs : (item.obs||"");
+          let unsavedStyle = UNSAVED_ROWS[item.row] ? "background-color: #fff8e1;" : "";
+          if (UNSAVED_ROWS[item.row]) tr.style.borderLeft = "4px solid var(--orange)";
+
+          tr.innerHTML = `
+            <td style="text-align:center"><input type="checkbox" class="row-check" value="${item.row}" style="width:auto;"></td>
+            <td class="data-mono"><strong>${item.codigo}</strong></td><td>${item.desc||''}</td>
+            <td class="info-col info-cell data-mono">${item.serie||''}</td><td class="info-col info-cell data-mono">${item.lote||''}</td>
+            <td class="info-col info-cell data-mono">${item.nDespacho||''}</td><td class="info-col info-cell data-mono">${item.nPartida||''}</td>
+            <td>${item.est||''}</td><td><strong>${item.cat||''}</strong></td> 
+            <td class="depot-col" style="font-weight:bold; font-size:14px; color:var(--accent); text-align:center;">${item.depot}</td>
+            <td><span class="badge ${item.estado==='CORRECTO'?'badge-ok':(item.estado==='PENDIENTE'?'badge-neutral':'badge-err')}">${item.estado}</span></td>
+            <td id="hist-${item.row}">${buildHistoryHtml(item.c1, item.c2, item.c3)}</td>
+            <td style="text-align:center" id="cell-input-${item.row}">
+               ${item.nextStep > 3 ? `<button class="btn-primary" onclick="abrirModalAjuste(${item.row})" style="padding:4px; font-size:10px;">AJUSTE</button>` : 
+                 `<input type="number" id="qty-${item.row}" placeholder="C${item.nextStep}" value="${pendingVal}" style="width:60px; text-align:center; font-weight:bold; ${unsavedStyle}" onfocus="IS_USER_TYPING=true" onblur="IS_USER_TYPING=false" oninput="marcarFilaNoGuardada(${item.row})" onkeydown="if(event.key==='Enter') saveRowSpecific(${item.row}, this.value, document.getElementById('obs-${item.row}').value)">`}
+            </td>
+            <td><input type="text" id="obs-${item.row}" value="${pendingObs}" style="width:100%; border:none; background:transparent; font-size:11px;" onfocus="IS_USER_TYPING=true" onblur="IS_USER_TYPING=false" oninput="marcarFilaNoGuardada(${item.row})"></td>
+            <td style="text-align:center">${item.nextStep <= 3 ? `<button class="btn-primary" onclick="saveRowSpecific(${item.row}, document.getElementById('qty-${item.row}').value, document.getElementById('obs-${item.row}').value)" style="padding:4px; min-width:24px;"><span class="material-icons" style="font-size:14px; margin:0;">save</span></button>` : ''}</td>`;
+          tbody.appendChild(tr);
+      });
+      applyInfoVisibility(); document.querySelectorAll('.depot-col').forEach(c => c.style.display = DEPOT_OPEN ? 'table-cell' : 'none');
+      updateSortIconsCount();
+    }
+
+    function sortCountTable(key) { CONFIG_COUNT.sortAsc = (CONFIG_COUNT.sortKey === key) ? !CONFIG_COUNT.sortAsc : true; CONFIG_COUNT.sortKey = key; renderTableData(); }
+    function updateSortIconsCount() {
+       document.querySelectorAll('#invTable th span.sort-indicator').forEach(s => s.innerHTML = ""); 
+       const icon = CONFIG_COUNT.sortAsc ? "arrow_drop_down" : "arrow_drop_up";
+       const el = document.getElementById('sort-'+CONFIG_COUNT.sortKey);
+       if(el) el.innerHTML = `<span class="material-icons sort-indicator">${icon}</span>`;
+    }
+
+    // --- HOME: LISTA VS LAYOUT (RESTAURADO HORIZONTAL + FILTRO DINAMICO) ---
+    function parsePos(posStr) {
+       let parts = posStr.split('-');
+       if (parts.length >= 4) {
+           let nivel = parseInt(parts.pop()) || 0;
+           let col = parseInt(parts.pop()) || 0;
+           let literal = parts.pop() || "";
+           let nave = parts.join('-') || "";
+           return { nave, literal, col, nivel };
+       }
+       return { nave: posStr, literal: "", col: 0, nivel: 0 };
+    }
+
+    function sortHomeTable(key) {
+        if (HOME_SORT_CONFIG.key === key) HOME_SORT_CONFIG.asc = !HOME_SORT_CONFIG.asc;
+        else { HOME_SORT_CONFIG.key = key; HOME_SORT_CONFIG.asc = true; }
+        filterPositions();
+    }
+
+    function filterPositionsData() {
+        let n = document.getElementById('fltNave')?.value.toUpperCase() || "";
+        let r = document.getElementById('fltRack')?.value.toUpperCase() || "";
+        let c = document.getElementById('fltCol')?.value.toUpperCase() || "";
+        let nv = document.getElementById('fltNiv')?.value.toUpperCase() || "";
+        
+        return ALL_POS.filter(p => {
+            let parts = parsePos(p.nombre);
+            return parts.nave.includes(n) && parts.literal.includes(r) && String(parts.col).includes(c) && String(parts.nivel).includes(nv);
+        });
+    }
+
+    function filterPositions() { renderPosList(filterPositionsData()); }
+
+    function clearFilters() {
+        document.getElementById('fltNave').value = ""; document.getElementById('fltRack').value = "";
+        document.getElementById('fltCol').value = ""; document.getElementById('fltNiv').value = "";
+        filterPositions();
+    }
+
+    function renderPosList(l) {
+       const mapContainer = document.getElementById('rackMapContainer');
+       const tableContainer = document.getElementById('posTableContainer');
+       
+       if(l.length === 0) { 
+           mapContainer.innerHTML = "";
+           tableContainer.innerHTML = "<div style='color:#999; text-align:center; padding:20px;'>Sin ubicaciones</div>"; 
+           return; 
+       }
+
+       // 1. MAPA DE RACKS HORIZONTAL (DIBUJA SOLO COLUMNAS FILTRADAS)
+       const racks = {};
+       l.forEach(p => {
+           let parts = parsePos(p.nombre); let rackId = `${parts.nave}-${parts.literal}`;
+           if (!rackId || rackId === "-") rackId = "OTROS";
+           
+           if (!racks[rackId]) racks[rackId] = { maxNiv: 0, cols: new Set(), items: {} };
+           if (parts.nivel > racks[rackId].maxNiv) racks[rackId].maxNiv = parts.nivel;
+           racks[rackId].cols.add(parts.col); // Solo guarda las columnas que existen en la data filtrada
+           
+           racks[rackId].items[`${parts.col}-${parts.nivel}`] = p;
+       });
+
+       let mapHtml = `<div class="rack-map">`;
+       for (let rId in racks) {
+           let rack = racks[rId];
+           let sortedCols = Array.from(rack.cols).sort((a,b) => a - b);
+           
+           mapHtml += `<div class="rack-block">
+               <div class="rack-title">RACK ${rId}</div>
+               <table class="rack-grid">`;
+           
+           for (let n = rack.maxNiv; n >= 1; n--) {
+               mapHtml += `<tr><td class="rack-axis">N${n}</td>`;
+               // ITERA SOLO SOBRE LAS COLUMNAS FILTRADAS (No de 1 a maxCol)
+               sortedCols.forEach(c => {
+                   let posData = rack.items[`${c}-${n}`];
+                   if (posData) {
+                       let isSel = (posData.nombre === CURRENT_POS) ? "box-shadow: inset 0 0 0 2px black;" : "";
+                       mapHtml += `<td class="rack-cell" style="background:${posData.color}; ${isSel}" 
+                                       title="${posData.nombre} | ${posData.categoria} | Avance: ${posData.avance}%"
+                                       onclick="CURRENT_POS='${posData.nombre}'; filterPositions();" 
+                                       ondblclick="CURRENT_POS='${posData.nombre}'; nav('count'); loadCountTable();">
+                                   </td>`;
+                   } else { mapHtml += `<td class="rack-empty"></td>`; }
+               });
+               mapHtml += `</tr>`;
+           }
+           mapHtml += `<tr><td></td>`;
+           sortedCols.forEach(c => { mapHtml += `<td class="rack-axis">${c}</td>`; });
+           mapHtml += `</tr></table></div>`;
+       }
+       mapHtml += `</div>`;
+       mapContainer.innerHTML = mapHtml;
+
+       // 2. TABLA DINÁMICA
+       l.sort((a, b) => {
+           let pa = parsePos(a.nombre), pb = parsePos(b.nombre);
+           let valA, valB;
+           switch(HOME_SORT_CONFIG.key) {
+               case 'prioridad': valA = a.prioridad; valB = b.prioridad; break;
+               case 'avance': valA = a.avance; valB = b.avance; break;
+               case 'nombre': valA = a.nombre; valB = b.nombre; break;
+               case 'nave': valA = pa.nave; valB = pb.nave; break;
+               case 'literal': valA = pa.literal; valB = pb.literal; break;
+               case 'col': valA = pa.col; valB = pb.col; break;
+               case 'nivel': valA = pa.nivel; valB = pb.nivel; break;
+               default: valA = a.prioridad; valB = b.prioridad;
+           }
+           if (typeof valA === 'string') return HOME_SORT_CONFIG.asc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+           else return HOME_SORT_CONFIG.asc ? (valA - valB) : (valB - valA);
+       });
+
+       const getSortIcon = (k) => HOME_SORT_CONFIG.key === k ? (HOME_SORT_CONFIG.asc ? '<span class="material-icons sort-indicator" style="font-size:11px;">arrow_drop_up</span>' : '<span class="material-icons sort-indicator" style="font-size:11px;">arrow_drop_down</span>') : '';
+
+       let tableHtml = `<div class="home-table-container"><table class="home-table">
+           <thead><tr>
+               <th onclick="sortHomeTable('prioridad')" width="100">ESTADO ${getSortIcon('prioridad')}</th>
+               <th onclick="sortHomeTable('avance')" width="60">AVANCE ${getSortIcon('avance')}</th>
+               <th onclick="sortHomeTable('nombre')">POSICIÓN ${getSortIcon('nombre')}</th>
+               <th onclick="sortHomeTable('nave')">NAVE ${getSortIcon('nave')}</th>
+               <th onclick="sortHomeTable('literal')">LIT. ${getSortIcon('literal')}</th>
+               <th onclick="sortHomeTable('col')">COL. ${getSortIcon('col')}</th>
+               <th onclick="sortHomeTable('nivel')">NIV. ${getSortIcon('nivel')}</th>
+           </tr></thead><tbody>`;
+
+       l.forEach(p => {
+           let parts = parsePos(p.nombre);
+           let isSelected = (p.nombre === CURRENT_POS) ? "background:#e3f2fd;" : "";
+           tableHtml += `<tr style="${isSelected}" onclick="CURRENT_POS='${p.nombre}'; filterPositions();" ondblclick="CURRENT_POS='${p.nombre}'; nav('count'); loadCountTable();">
+               <td><span style="background:${p.color}; color:white; padding:3px 6px; border-radius:3px; font-size:10px; font-weight:bold; white-space:nowrap;">${p.categoria}</span></td>
+               <td><span style="font-size:10px; font-weight:bold;">${p.avance}%</span></td>
+               <td style="font-weight:bold; color:var(--primary);">${p.nombre}</td>
+               <td>${parts.nave}</td><td>${parts.literal}</td><td>${parts.col}</td><td>${parts.nivel}</td>
+           </tr>`;
+       });
+       tableHtml += `</tbody></table></div>`;
+       tableContainer.innerHTML = tableHtml;
+    }
+
+
+    // --- LÓGICA DE ESCANEO RÁPIDO CON AUTO-GUARDADO ---
+    let isQuickScanning = false;
+    function handleQuickScan(e){ 
+       if(e.key==='Enter') { 
+          if(isQuickScanning) return; 
+          isQuickScanning = true; 
+          triggerQuickScan(); 
+       } 
+    }
+
+    function triggerQuickScan(){
+       const s = document.getElementById('quickSku').value.trim().toUpperCase();
+       const qInputStr = document.getElementById('quickQty').value;
+       const qVal = parseFloat(qInputStr) || 1;
+       
+       if(!s) { isQuickScanning = false; return; }
+       
+       const matches = TABLE_DATA.filter(i=>String(i.codigo).trim().toUpperCase()===s);
+       
+       if(matches.length === 0){
+          google.script.run.withSuccessHandler(r=>{
+             if(r.length>0) Swal.fire("Ubicación Incorrecta",`Revisar Búsqueda SKU`,"info");
+             else Swal.fire("No encontrado","SKU inexistente","error");
+             resetQuickScanUI();
+          }).buscarUbicacionesPorSku(s);
+       } else if(matches.length > 1) {
+          let html = `<div style="font-size:11px; text-align:left;"><table style="width:100%; border-collapse:collapse;"><tr><th>Sel</th><th>Lote</th><th>Partida</th><th>Cant. Dep</th></tr>`;
+          matches.forEach((m, idx) => { html += `<tr><td><input type="radio" name="swal-row-sel" value="${m.row}" ${idx===0?'checked':''}></td><td>${m.lote||'-'}</td><td>${m.nPartida||'-'}</td><td>${m.depot}</td></tr>`; });
+          html += `</table></div>`;
+          
+          Swal.fire({ title: 'Múltiples Registros Mismo SKU', html: html, showCancelButton: true, confirmButtonText: 'Sumar a fila', cancelButtonText: 'Cancelar'
+          }).then(r => {
+             if (r.isConfirmed) { const selRow = document.querySelector('input[name="swal-row-sel"]:checked').value; procesarAcumulacionLocal(matches.find(m => m.row == selRow), qVal, qInputStr); }
+             resetQuickScanUI();
+          });
+       } else {
+          procesarAcumulacionLocal(matches[0], qVal, qInputStr);
+          resetQuickScanUI();
+       }
+    }
+
+    function procesarAcumulacionLocal(item, addQty, qInputStr) {
+       if(item.nextStep > 3) return Swal.fire("Full","Fila con 3 conteos cerrados","warning");
+       if(item.cat === 'REQUIERE_SERIE' || item.serie) return Swal.fire({ title: 'Requiere Serie', text: '¿Ir a Pestaña Series?', icon: 'info', showCancelButton: true, confirmButtonText: 'Sí' }).then(r => { if (r.isConfirmed) { document.getElementById('targetPos').value = CURRENT_POS; nav('series'); }});
+
+       const inputEl = document.getElementById('qty-' + item.row);
+       if (!inputEl) return;
+       
+       let teorico = parseFloat(item.depot);
+       let isManualEdit = qInputStr !== "1" && qInputStr !== ""; 
+       
+       let currentVal = parseFloat(inputEl.value) || 0; 
+       let newVal = isManualEdit ? addQty : currentVal + addQty; 
+       
+       inputEl.value = newVal; 
+       marcarFilaNoGuardada(item.row); 
+       inputEl.style.backgroundColor = "#fff8e1";
+
+       if (teorico && isManualEdit && newVal >= teorico) {
+           let msg = (newVal === teorico) ? `Se alcanzó la cantidad teórica (${teorico}).` : `Se superó la cantidad teórica (${teorico}). Total escaneado: ${newVal}.`;
+           let iconType = (newVal === teorico) ? 'success' : 'warning';
+           
+           Swal.fire({
+               title: 'Confirmar Guardado', text: `${msg} ¿Guardar registro automáticamente?`, icon: iconType, showCancelButton: true, confirmButtonText: 'Sí, guardar', cancelButtonText: 'Seguir contando'
+           }).then(r => {
+               if(r.isConfirmed) saveRowSpecific(item.row, newVal, document.getElementById('obs-'+item.row)?.value || "");
+               else showToast(`+${addQty} (Acumulado: ${newVal})`);
+           });
+       } else {
+           if (teorico && newVal > teorico) showToast(`¡SOBRANTE! Acumulado: ${newVal}`);
+           else if (teorico && newVal === teorico) showToast(`¡COMPLETO! Acumulado: ${newVal}`);
+           else showToast(`+${addQty} (Total: ${newVal})`);
+       }
+    }
+
+    function resetQuickScanUI() {
+       document.getElementById('quickSku').value = ""; document.getElementById('quickQty').value = "1";
+       setTimeout(() => { isQuickScanning = false; document.getElementById('quickSku').focus(); }, 150); 
+    }
+    
+    function saveRowSpecific(r,q,o){
+        if (!q) return; IS_USER_TYPING=false;
+        const i=document.getElementById('qty-'+r); if(i){i.disabled=true;i.style.backgroundColor="#e8f5e9";}
+        google.script.run.withSuccessHandler(res=>{
+            if(res.requiereAjuste){ if(i){i.disabled=false;i.style.backgroundColor="";} abrirModalAjuste(r); }
+            else if(res.exito){ delete UNSAVED_ROWS[r]; showToast("Fila Guardada"); const idx=TABLE_DATA.findIndex(x=>x.row===r); if(idx>-1){ TABLE_DATA[idx].c1=res.c1; TABLE_DATA[idx].c2=res.c2; TABLE_DATA[idx].c3=res.c3; TABLE_DATA[idx].nextStep=res.nextStep; TABLE_DATA[idx].obs=o; TABLE_DATA[idx].estado = res.estado; } renderTableData(); }
+        }).guardarConteoFila(r,q,o, USER_EMAIL);
+    }
+    
+    function saveMultiple(){ 
+       IS_USER_TYPING=false; const c=document.querySelectorAll('.row-check:checked'); if(c.length===0)return showToast("Seleccione filas"); 
+       const p=[]; c.forEach(x=>{ const id=parseInt(x.value); const v=document.getElementById('qty-'+id)?.value; const o=document.getElementById('obs-'+id)?.value; if(v||o) p.push({row:id,val:v,obs:o}); }); 
+       if(p.length===0)return showToast("Celdas vacías"); 
+       Swal.fire({title:'Guardando...',didOpen:()=>Swal.showLoading()}); 
+       google.script.run.withSuccessHandler(r=>{ if(r.exito){ p.forEach(x => delete UNSAVED_ROWS[x.row]); Swal.fire("Éxito",`Registros: ${r.procesados}`,"success"); loadCountTable(); } else Swal.fire("Error",r.mensaje,"error") }).guardarConteoMasivo(p, USER_EMAIL); 
+    }
+
+    function searchBySku(){
+       const s=document.getElementById('searchSku').value; if(!s)return; document.getElementById('skuResults').innerHTML="Buscando detalles...";
+       google.script.run.withSuccessHandler(r=>{
+          const d=document.getElementById('skuResults'); d.innerHTML="";
+          if(r.length===0) { d.innerHTML="<div style='text-align:center; padding:10px; color:#999;'>No hay coincidencias</div>"; return; }
+          r.forEach(p=>{
+             const b=document.createElement('div');
+             let color = p.est === 'CORRECTO' ? 'var(--success)' : (p.est === 'FALTANTE' ? 'var(--danger)' : (p.est === 'SOBRANTE' ? 'var(--warning)' : 'var(--secondary)'));
+             let desfaseTxt = p.dif !== 0 ? `<span style="color:${p.dif<0?'var(--danger)':'var(--warning)'}; font-weight:bold;">Dif: ${p.dif>0?'+'+p.dif:p.dif}</span>` : `<span style="color:var(--success)">OK</span>`;
+             b.innerHTML=`<div style="display:flex; justify-content:space-between; align-items:center;"><div><span class="material-icons" style="font-size:12px; color:var(--accent);">place</span> <strong>${p.pos}</strong></div><div style="font-size:11px;">${desfaseTxt}</div></div><div style="font-size:9px; color:${color}; margin-top:2px; font-weight:bold;">${p.est||'PENDIENTE'}</div>`;
+             b.style.cssText="padding:10px; border-bottom:1px solid #eee; cursor:pointer; background:white; margin-bottom:5px; border-radius:4px; box-shadow:0 1px 2px rgba(0,0,0,0.05); transition:0.2s;";
+             b.onmouseover = () => b.style.transform = "scale(1.02)"; b.onmouseout = () => b.style.transform = "none";
+             b.onclick=()=>{CURRENT_POS=p.pos;nav('count');loadCountTable();}; d.appendChild(b);
+          });
+       }).buscarUbicacionesPorSku(s);
+    }
+
+    // --- SERIES LOGIC (MODIFICADO PARA NO QUITAR LA "S") ---
+    function loadSeriesHistory() { 
+       const newItems = SERIES_DATA.filter(i => i.type === 'new');
+       document.getElementById('seriesList').innerHTML = "<div style='padding:20px; text-align:center; color:#999;'>Cargando...</div>";
+       google.script.run.withSuccessHandler(list => { 
+           const histItems = list.map(s => ({...s, type: 'hist'}));
+           SERIES_DATA = [...newItems, ...histItems]; 
+           renderSeriesList(); 
+       }).obtenerHistorialSeries(CURRENT_POS); 
+    }
+
+    function handleSeriesScan(e) {
+      if(e.key === 'Enter') {
+        let val = e.target.value.trim().toUpperCase(); if(!val) return; e.target.value = ""; 
+        
+        // ENVÍA EL VALOR TAL COMO ES. EL BACKEND HARÁ EL FUZZY MATCH.
+        if(SERIES_DATA.some(i => i.serie === val)) return Swal.fire("Duplicado", "Serie ya escaneada.", "warning");
+
+        const tempId = Date.now(); SERIES_DATA.push({ id: tempId, serie: val, type: 'new', loading: true }); renderSeriesList(); 
+        google.script.run.withSuccessHandler(res => {
+           const idx = SERIES_DATA.findIndex(i => i.id === tempId);
+           if(idx > -1) {
+              const item = SERIES_DATA[idx]; item.loading = false;
+              
+              if (res.serieReal && res.serieReal !== val) item.serie = res.serieReal; 
+              
+              if(res.duplicado) { item.duplicate = true; item.desc = "DUP: "+(res.datos.pos||"?"); if(res.datos.pos) document.getElementById('displayOrigin').value = res.datos.pos; } 
+              else if(res.encontrado) { item.existe = true; item.sku = res.datos.sku; item.desc = res.datos.desc; item.posOriginal = res.datos.pos; document.getElementById('displayOrigin').value = res.datos.pos; let tPos = document.getElementById('targetPos').value.trim().toUpperCase(); if (tPos && res.datos.pos !== tPos) { item.wrongPos = true; Swal.fire({ title: 'Ubicación Diferente', html: `En BD: <b>${res.datos.pos}</b>.<br>Mover a: <b>${tPos}</b>.`, icon: 'warning', timer: 3000 }); } } else { item.existe = false; item.sku = "SIN DATOS"; item.desc = "No registrado"; document.getElementById('displayOrigin').value = "---"; }
+              renderSeriesList(); 
+           }
+        }).validarSerieCompleta(val);
+      }
+    }
+
+    function renderSeriesList() {
+      const div = document.getElementById('seriesList'); div.innerHTML = ""; document.getElementById('cntBadge').innerText = SERIES_DATA.filter(i => i.type === 'new' && !i.duplicate).length;
+      SERIES_DATA.slice().reverse().forEach((item, idx) => {
+          let b = "4px solid var(--success)", bg = "badge-ok", txt = "NUEVO";
+          if(item.loading) { b = "4px solid var(--warning)"; bg = "badge-neutral"; txt = "⏳"; } else if(item.type === 'hist') { b = "4px solid #b0bec5"; bg = "badge-neutral"; txt = "HIST"; } else if(item.duplicate) { b = "4px solid var(--danger)"; bg = "badge-err"; txt = "DUP"; } else if(item.wrongPos) { b = "4px solid var(--orange)"; bg = "badge-err"; txt = "UBIC. DIFERENTE"; } else if(!item.existe) { b = "4px solid var(--warning)"; txt = "?"; }
+          div.innerHTML += `<div style="border-left:${b}; padding:8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; background:${item.type==='hist'?'#fafafa':'white'};"><div><div style="margin-bottom:2px;"><span class="badge ${bg}">${txt}</span> <span class="data-mono" style="font-weight:bold; font-size:14px;">${item.serie}</span></div><div style="font-size:11px; color:#546e7a;">${item.sku||''} ${item.posOriginal?`<span style="color:var(--accent);">[${item.posOriginal}]</span>`:''} <br> ${item.desc||''}</div></div>${item.type === 'new' ? `<button onclick="SERIES_DATA.splice(${SERIES_DATA.length-1-idx},1);renderSeriesList();" style="background:none; color:var(--danger); padding:0;">&times;</button>` : ''}</div>`;
+      });
+    }
+
+    let PENDING_PAYLOAD = []; 
+    function iniciarFlujoProcesoSeries() {
+       if(!USER_EMAIL) return Swal.fire("Error", "Falta usuario.", "error");
+       if(SERIES_DATA.some(i => i.loading)) return Swal.fire("Espere", "Validando series...", "info");
+       const tPos = document.getElementById('targetPos').value.trim().toUpperCase(); if(!tPos) return Swal.fire("Atención", "Defina Destino Final.", "warning");
+       const validItems = SERIES_DATA.filter(i => i.type === 'new' && !i.duplicate); if(validItems.length === 0) return Swal.fire("Sin datos", "No hay series válidas.", "info");
+       const wrongPos = validItems.filter(i => i.wrongPos);
+       if (wrongPos.length > 0) { Swal.fire({ title: 'Cruce de Ubicación', html: `Hay <b>${wrongPos.length}</b> serie(s) de otra ubicación.<br>¿Forzar movimiento a <b>${tPos}</b>?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí, mover' }).then((r) => { if(r.isConfirmed) verificarDesconocidosYGuardar(validItems, tPos); }); return; }
+       verificarDesconocidosYGuardar(validItems, tPos);
+    }
+    function verificarDesconocidosYGuardar(items, tPos) {
+       const desc = items.filter(i => !i.existe);
+       if (desc.length > 0) { PENDING_PAYLOAD = items; Swal.fire({ title: 'Series Desconocidas', html: `<b>${desc.length}</b> sin registro.<br>¿Reportar Hallazgo en <b>${tPos}</b>?`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí' }).then((r) => { if(r.isConfirmed) abrirModalHallazgoBatch(); }); return; }
+       addToBackgroundQueue(items, null, tPos);
+    }
+    function addToBackgroundQueue(items, altData, targetPos) { PROCESSING_QUEUE.push({ items: items, alt: altData, target: targetPos }); SERIES_DATA = SERIES_DATA.filter(i => i.type === 'hist'); renderSeriesList(); document.getElementById('displayOrigin').value = ""; showToast("Procesando fondo..."); if(!IS_PROCESSING_BG) processBackgroundQueue(); }
+    function processBackgroundQueue() {
+       if(PROCESSING_QUEUE.length === 0) { IS_PROCESSING_BG = false; document.getElementById('syncStatus').style.opacity = 0; return; }
+       IS_PROCESSING_BG = true; document.getElementById('syncStatus').style.opacity = 1; 
+       const job = PROCESSING_QUEUE.shift(); 
+       const payload = job.items.map(i=>({ serie:i.serie, producto:(!i.existe && job.alt) ? job.alt.sku : (i.sku||"SIN_SKU"), posicion: job.target, esDesconocido: !i.existe }));
+       google.script.run.withSuccessHandler(res => { if(res.exito) showToast("Series Guardadas"); processBackgroundQueue(); }).withFailureHandler(err => { processBackgroundQueue(); }).procesarGuardadoInventario(payload, job.alt, USER_EMAIL);
+    }
+
+    function loadAnalysis() { document.getElementById('loadingAnalysis').style.display = 'block'; document.getElementById('bodyAnalysis').innerHTML = ""; google.script.run.withSuccessHandler(res => { renderAnalysis(res); }).obtenerDatosAnalisis(); }
+    function renderAnalysis(res) {
+       document.getElementById('loadingAnalysis').style.display = 'none';
+       if(res.exito) {
+          document.getElementById('kpi-uni').innerText = res.kpis.efectividadUnidades + '%'; 
+          let pctUni = res.kpis.uniTotal === 0 ? 0 : Math.round((res.kpis.uniValidadas / res.kpis.uniTotal)*100);
+          document.getElementById('bar-uni').style.width = pctUni + '%';
+          document.getElementById('sub-uni').innerText = `${res.kpis.uniValidadas} Avanzadas | ${res.kpis.uniTotal - res.kpis.uniValidadas} Pendientes`;
+
+          document.getElementById('kpi-ref').innerText = res.kpis.efectividadRef + '%'; 
+          let pctRef = res.kpis.refTotal === 0 ? 0 : Math.round((res.kpis.refValidadas / res.kpis.refTotal)*100);
+          document.getElementById('bar-ref').style.width = pctRef + '%';
+          document.getElementById('sub-ref').innerText = `${res.kpis.refValidadas} Avanzadas | ${res.kpis.refTotal - res.kpis.refValidadas} Pendientes`;
+
+          document.getElementById('kpi-pos').innerText = res.kpis.efectividadPos + '%';
+          let pctPos = res.kpis.posTotal === 0 ? 0 : Math.round((res.kpis.posValidadas / res.kpis.posTotal)*100);
+          document.getElementById('bar-pos').style.width = pctPos + '%';
+          document.getElementById('sub-pos').innerText = `${res.kpis.posValidadas} Avanzadas | ${res.kpis.posTotal - res.kpis.posValidadas} Pendientes`;
+
+          let tbody = document.getElementById('bodyAnalysis'); tbody.innerHTML = "";
+          if(res.discrepancias.length === 0) tbody.innerHTML = "<tr><td colspan='8' style='text-align:center; padding:20px; color:var(--success);'>Inventario Perfecto. Sin Desfases.</td></tr>";
+          else { res.discrepancias.forEach(d => { let cl = d.estado === 'FALTANTE' ? 'var(--danger)' : 'var(--warning)'; tbody.innerHTML += `<tr><td><strong>${d.pos}</strong></td><td class="data-mono">${d.sku}</td><td>${d.desc}</td><td><span class="badge" style="background:${cl}; color:white;">${d.estado}</span></td><td style="text-align:center">${d.qTeo}</td><td style="text-align:center">${d.qFis}</td><td style="text-align:center; font-weight:bold; color:${cl}">${d.dif}</td><td style="text-align:center"><button class="btn-primary" style="padding:4px;" onclick="CURRENT_POS='${d.pos}'; nav('count'); loadCountTable();"><span class="material-icons" style="font-size:12px;">arrow_forward</span></button></td></tr>`; }); }
+       }
+    }
+
+    function abrirModalHallazgoBatch(){document.getElementById('hzSku').value="";document.getElementById('modalHallazgoBatch').style.display='flex';}
+    function cerrarModalHallazgoBatch(){document.getElementById('modalHallazgoBatch').style.display='none';}
+    function confirmarHallazgoBatch(){ const s=document.getElementById('hzSku').value.trim(); if(!s)return Swal.fire("Error","SKU obligatorio","warning"); cerrarModalHallazgoBatch(); addToBackgroundQueue(PENDING_PAYLOAD, {sku:s,desc:document.getElementById('hzDesc').value,justificacion:document.getElementById('hzJust').value}, document.getElementById('targetPos').value); }
+    function buildHistoryHtml(c1,c2,c3){let h="";if(c1)h+=`<span class="badge badge-neutral">1: ${c1}</span> `;if(c2)h+=`<span class="badge badge-neutral">2: ${c2}</span> `;if(c3)h+=`<span class="badge badge-neutral">3: ${c3}</span>`;return h;}
+    function toggleAll(s){document.querySelectorAll('.row-check').forEach(c=>c.checked=s.checked);}
+    function saveAlterna(){ const d={codigo:document.getElementById('altCod').value,cantidad:document.getElementById('altCant').value,posicion:document.getElementById('altPos').value,desc:document.getElementById('altDesc').value,lote:document.getElementById('altLote').value,serie:document.getElementById('altSerie').value,justificacion:document.getElementById('altJust').value,obs:document.getElementById('altObs').value}; if(!d.codigo||!d.cantidad)return Swal.fire("Datos","Faltan campos","warning"); google.script.run.withSuccessHandler(r=>{ Swal.fire("OK",r.mensaje,"success"); document.getElementById('altCod').value=""; }).guardarPlanillaAlternaCompleta(d, USER_EMAIL); }
+    function abrirModalAjuste(id) { document.getElementById('adjRowId').value = id; document.getElementById('adjQty').value = ""; document.getElementById('modalAjuste').style.display = 'flex'; setTimeout(() => document.getElementById('adjQty').focus(), 100); }
+    function cerrarModalAjuste() { document.getElementById('modalAjuste').style.display = 'none'; }
+    function confirmarAjuste() { const rowId = document.getElementById('adjRowId').value, motivo = document.getElementById('adjMotivo').value, justif = document.getElementById('adjJustificacion').value, cantidad = document.getElementById('adjQty').value; if (cantidad === "") return Swal.fire("Atención", "Ingrese cantidad", "warning"); const btn = document.querySelector('#modalAjuste .btn-success'); const txt = btn.innerText; btn.innerText = "Procesando..."; btn.disabled = true; google.script.run.withSuccessHandler(() => { cerrarModalAjuste(); btn.innerText = txt; btn.disabled = false; loadCountTable(); showToast("Ajuste registrado"); }).registrarAjusteInventario(rowId, motivo, justif, cantidad, USER_EMAIL); }
+    function clearSeries() { SERIES_DATA = SERIES_DATA.filter(i => i.type === 'hist'); renderSeriesList(); }
+  </script>
+</body>
+</html>
