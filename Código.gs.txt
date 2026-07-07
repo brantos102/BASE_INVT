@@ -12,80 +12,54 @@ const USUARIOS_MAP = {
   "dmelendez@itsanet.com": "Melendez Diego"
 };
 
-function doGet(e) {
-  return HtmlService.createHtmlOutputFromFile('BlindInventory')
-      .setTitle('TERMINAL WMS - CONTROL DE INVENTARIO')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-}
-
-function obtenerConfiguracionUsuarios() {
-  return Object.keys(USUARIOS_MAP).map(email => ({ email: email, nombre: USUARIOS_MAP[email] }))
-        .sort((a, b) => a.nombre.localeCompare(b.nombre));
-}
-
+// ==========================================
+// 1. MENÚ PRINCIPAL
+// ==========================================
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('Inventarios ')
-    .addItem('ITSANET - TERMINAL', 'abrirInventarioCiego')
+  SpreadsheetApp.getUi().createMenu('⚙️ WMS Automático')
+    .addItem('🚀 1. ACTIVAR ARCHIVO NUEVO (Clic al crear copia)', 'instalarTriggersEnCopia')
     .addSeparator()
-    .addItem('Actualizar Análisis', 'actualizarAnalisis')
-    .addItem('Actualizar ABC', 'consolidarDatos')
-    .addItem('Actualizar Registro', 'actualizarRegistro')
-    .addItem('Gatillo', 'crearTriggerAutomatico')
+    .addItem('▶️ Forzar Inicialización (A,C,D,F)', 'forzarInicializacionManual')
+    .addItem('📊 Actualizar Análisis', 'actualizarAnalisis')
+    .addItem('🔠 Actualizar ABC', 'consolidarDatos')
     .addToUi();
 }
 
-function abrirInventarioCiego() {
-  const html = HtmlService.createHtmlOutputFromFile('BlindInventory').setTitle('TERMINAL WMS').setWidth(1200).setHeight(800);
-  SpreadsheetApp.getUi().showModalDialog(html, 'TERMINAL DE INVENTARIO');
+function instalarTriggersEnCopia() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const triggers = ScriptApp.getProjectTriggers();
+  
+  // Limpiar para evitar duplicados
+  triggers.forEach(t => ScriptApp.deleteTrigger(t));
+
+  // Instalar Trigger de fondo (Revisa cada 30 min si debe trabajar o dormir)
+  ScriptApp.newTrigger("rutinaDeFondoMaestra")
+    .timeBased()
+    .everyMinutes(30)
+    .create();
+
+  // Despertar el sistema por primera vez
+  PropertiesService.getScriptProperties().setProperty('WMS_LAST_INTERACTION', Date.now().toString());
+  PropertiesService.getScriptProperties().setProperty('WMS_SYSTEM_SLEEPING', 'false');
+
+  SpreadsheetApp.getUi().alert(
+    "✅ ¡ARCHIVO ACTIVADO CON ÉXITO!\n\n" +
+    "Los permisos han sido concedidos. El sistema operará automáticamente mientras los operarios trabajen y se pausará tras 3 horas de inactividad."
+  );
+  
+  forzarInicializacionManual();
 }
 
-/*function onEdit(e) {
-  try {
-    if (!e || !e.range) return;
-    const sheet = e.range.getSheet(), name = sheet.getName(), row = e.range.getRow(), col = e.range.getColumn();
-    if (row < 2) return;
-    if (name === "REGISTRO") {
-       SpreadsheetApp.getUi().alert("⛔ ALERTA DE SEGURIDAD\n\nEl registro de auditoría es INALTERABLE.");
-       if (e.oldValue !== undefined) { e.range.setValue(e.oldValue); } else { e.range.clearContent(); }
-       return;
-    }
-
-    if (name === "PLANILLA DE CONTEO FISICO") {
-      if (col === 2) { 
-        if (e.value !== "" && e.value !== null) {
-          SpreadsheetApp.getUi().alert("⛔ ACCIÓN DENEGADA\n\nLa Columna B es automática (Fecha/Hora).");
-          e.range.setValue(e.oldValue || ""); 
-        }
-        return;
-      }
-      if ([22, 23, 24].includes(col)) {
-        if (e.oldValue !== undefined && e.oldValue !== "" && e.value !== e.oldValue) {
-           SpreadsheetApp.getUi().alert(`⛔ CONTEO CERRADO\nNo se pueden modificar conteos registrados.`);
-           e.range.setValue(e.oldValue); return;
-        }
-        verificarYActualizarColumnaB(sheet);
-        registrarAccionManual(e, sheet, row, col);
-        verificarConfiguracionInicial(sheet); // Automatización de primer conteo
-      }
-      if (row === 2 && (col === 1 || col === 3)) { 
-        actualizarColumnasAC(sheet);
-        generarSecuenciaColumnaD(sheet); 
-      }
-      if (col === 7) consolidarDatos();
-    }
-  } catch (error) {}
-}*/
-
+// ==========================================
+// 2. EL GATILLO PRINCIPAL (DIGITACIÓN DEL OPERARIO)
+// ==========================================
 function onEdit(e) {
   try {
     if (!e || !e.range) return;
     const sheet = e.range.getSheet(), name = sheet.getName(), row = e.range.getRow(), col = e.range.getColumn();
     if (row < 2) return;
-    
-    // ==========================================
-    // 1. PROTECCIONES ACTUALES INTACTAS
-    // ==========================================
+
+    // A) PROTECCIÓN DE REGISTRO
     if (name === "REGISTRO") {
        SpreadsheetApp.getUi().alert("⛔ ALERTA DE SEGURIDAD\n\nEl registro de auditoría es INALTERABLE.");
        if (e.oldValue !== undefined) { e.range.setValue(e.oldValue); } else { e.range.clearContent(); }
@@ -93,577 +67,214 @@ function onEdit(e) {
     }
 
     if (name === "PLANILLA DE CONTEO FISICO") {
+      
+      // B) PROTECCIÓN COLUMNA B
       if (col === 2) { 
-        if (e.value !== "" && e.value !== null) {
-          SpreadsheetApp.getUi().alert("⛔ ACCIÓN DENEGADA\n\nLa Columna B es automática (Fecha/Hora).");
+        if (e.value !== "" && e.value !== null && e.value !== undefined) {
+          SpreadsheetApp.getUi().alert("⛔ ACCIÓN DENEGADA\n\nLa Columna B es automática (Fecha del último registro).");
           e.range.setValue(e.oldValue || ""); 
         }
         return;
       }
+
+      // C) COPIAR A Y C SI SE EDITAN MANUALMENTE EN LA FILA 2
+      if (row === 2 && (col === 1 || col === 3)) {
+        actualizarColumnasAC(sheet);
+        return;
+      }
       
-      // ==========================================
-      // 2. EDICIÓN MANUAL DE CONTEOS (Col V, W, X)
-      // ==========================================
+      // D) EL GATILLO DE CONTEO (Columnas V, W, X)
       if ([22, 23, 24].includes(col)) {
         
-        // Bloqueo de conteos cerrados
+        // 1. Validar que no sobreescriban
         if (e.oldValue !== undefined && e.oldValue !== "" && e.value !== e.oldValue) {
            SpreadsheetApp.getUi().alert(`⛔ CONTEO CERRADO\nNo se pueden modificar conteos registrados.`);
            e.range.setValue(e.oldValue); return;
         }
-        
-        verificarYActualizarColumnaB(sheet);
+
+        // 2. Ejecutar Acciones Principales
         registrarAccionManual(e, sheet, row, col);
+        verificarYActualizarColumnaB(sheet); // Trae el último registro de REGISTRO a Col B
+        verificarConfiguracionInicial(sheet); // Chequea A y C
+        generarSecuenciaColumnaD(sheet); // Genera secuencia D en base a G
         
-        // ---------------------------------------------------------
-        // 3. NUEVO: AUTOMATIZACIÓN DEL PRIMER CONTEO MANUAL
-        // ---------------------------------------------------------
-        const a2 = sheet.getRange("A2").getValue();
-        if (!a2 || a2 === "") {
-            // Es el primerísimo conteo del archivo
-            sheet.getRange("A2").setValue(new Date());
-            sheet.getRange("C2").setValue(sheet.getParent().getName()); // Toma el ID/Nombre del archivo nuevo
-            
-            actualizarColumnasAC(sheet);
-            generarSecuenciaColumnaD(sheet);
-            
-            // El trigger no puede crearse desde un onEdit simple por reglas de Google,
-            // por lo que lanzamos el aviso obligatorio para encender el motor.
-            try {
-                crearTriggerMaestroInterno(); // Intenta hacerlo (funcionará si se hace desde el HTML)
-            } catch(err) {
-                SpreadsheetApp.getUi().alert(
-                    "🏁 PRIMER CONTEO DETECTADO\n\n" +
-                    "Se han configurado automáticamente la fecha y el ID del archivo.\n\n" +
-                    "⚠️ PASO OBLIGATORIO: Para que el Análisis y el ABC se actualicen solos de fondo, " +
-                    "vaya al menú superior y haga clic en:\n\n" +
-                    "Inventarios -> Gatillo"
-                );
-            }
-        } else {
-            // Si no es el primer conteo, mantenemos el sistema "Despierto"
-            try {
-               const prop = PropertiesService.getScriptProperties();
-               prop.setProperty('WMS_LAST_INTERACTION', Date.now().toString());
-               
-               // Si el sistema llevaba 4 horas dormido y alguien ingresó un dato manual, lo despierta y actualiza
-               if(prop.getProperty('WMS_SYSTEM_SLEEPING') === 'true') {
-                   prop.setProperty('WMS_SYSTEM_SLEEPING', 'false');
-                   actualizarAnalisis(); 
-               }
-            } catch(e) {} // Falla silenciosa si las propiedades de Google no cargan a tiempo
-        }
+        // 3. Despertar Sistema e intentar actualizar datos profundos
+        despertarSistemaYActualizar(sheet);
       }
-      
-      // ==========================================
-      // 4. ARRASTRE DE FÓRMULAS Y DATOS (Original)
-      // ==========================================
-      if (row === 2 && (col === 1 || col === 3)) { 
-        actualizarColumnasAC(sheet);
-        generarSecuenciaColumnaD(sheet); 
-      }
-      if (col === 7) consolidarDatos();
     }
   } catch (error) {}
 }
 
+// ==========================================
+// 3. FUNCIONES DE ACTUALIZACIÓN (A, B, C, D, F)
+// ==========================================
+function verificarConfiguracionInicial(sheet) {
+  const a2 = sheet.getRange("A2").getValue();
+  const c2 = sheet.getRange("C2").getValue();
+  let modificado = false;
 
-function pollRealTime(posicionActual, emailUsuario, reqType, clientLastUpdate) {
-  const cache = CacheService.getScriptCache();
-  const prop = PropertiesService.getScriptProperties();
-  let activeUsers = [];
-  if (emailUsuario) {
-    prop.setProperty('WMS_LAST_INTERACTION', Date.now().toString()); // Registra pulso de actividad
-    let usersObj = {};
-    try { const cached = cache.get("WMS_ACTIVE_USERS");
-    if (cached) usersObj = JSON.parse(cached); } catch(e) {}
-    usersObj[emailUsuario] = Date.now();
-    const now = Date.now();
-    for (let e in usersObj) {
-      if (now - usersObj[e] < 35000) activeUsers.push(USUARIOS_MAP[e] || e.split('@')[0]);
-      else delete usersObj[e];
-    }
-    cache.put("WMS_ACTIVE_USERS", JSON.stringify(usersObj), 60);
+  if (!a2 || a2.toString().trim() === "") {
+    sheet.getRange("A2").setValue(new Date());
+    modificado = true;
   }
-
-  const lastUpdateStr = cache.get("WMS_LAST_UPDATE");
-  const serverLastUpdate = lastUpdateStr ? parseInt(lastUpdateStr) : 0;
+  if (!c2 || c2.toString().trim() === "") {
+    sheet.getRange("C2").setValue(sheet.getParent().getName());
+    modificado = true;
+  }
   
-  let payload = { activeUsers: activeUsers, serverLastUpdate: serverLastUpdate };
-  if (clientLastUpdate && serverLastUpdate <= clientLastUpdate) {
-     payload.unchanged = true;
-     return payload;
+  if (modificado) {
+    actualizarColumnasAC(sheet);
   }
-
-  payload.unchanged = false;
-  if (reqType === 'HOME') payload.data = obtenerDatosIniciales();
-  else if (reqType === 'COUNT' && posicionActual) payload.data = obtenerDatosPosicion(posicionActual);
-  else if (reqType === 'ANALYSIS') payload.data = obtenerDatosAnalisis();
-
-  return payload;
 }
 
-function notificarCambioBD() { CacheService.getScriptCache().put("WMS_LAST_UPDATE", Date.now().toString(), 21600); }
-
-function obtenerDatosIniciales() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-  if (!sheet) return { exito: false, error: "Falta hoja" };
-  
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { exito: true, posiciones: [], avance: 0 };
-  const data = sheet.getRange(2, 7, lastRow - 1, 18).getValues(); 
-  let totalRef = 0, cerradasRef = 0;
-  const mapaPos = {};
-  for(let i=0; i < data.length; i++) {
-    const sku = String(data[i][0]).trim(), catLog = String(data[i][6]).trim().toUpperCase(), pos = String(data[i][8]).trim().toUpperCase();
-    if (!pos || catLog === "DIF_INV") continue; 
-
-    const estadoFinal = String(data[i][13]).trim().toUpperCase();
-    const c1 = data[i][15], c2 = data[i][16], c3 = data[i][17]; 
-    
-    if (sku) {
-       totalRef++;
-       if (c1 !== "" || c2 !== "" || c3 !== "" || estadoFinal === "CORRECTO") cerradasRef++;
-    }
-
-    if (!mapaPos[pos]) mapaPos[pos] = { nombre: pos, hasPendiente: false, hasCorrecto: false, hasFaltante: false, hasSobrante: false, totalItems: 0, validadosItems: 0 };
-    mapaPos[pos].totalItems++;
-    if (c1 !== "" || c2 !== "" || c3 !== "" || estadoFinal === "CORRECTO") mapaPos[pos].validadosItems++;
-    if (estadoFinal === "PENDIENTE" || estadoFinal === "") mapaPos[pos].hasPendiente = true;
-    else if (estadoFinal === "CORRECTO") mapaPos[pos].hasCorrecto = true;
-    else if (estadoFinal === "FALTANTE") mapaPos[pos].hasFaltante = true;
-    else if (estadoFinal === "SOBRANTE") mapaPos[pos].hasSobrante = true;
-  }
-
-  const posicionesArray = [];
-  for (let p in mapaPos) {
-     const m = mapaPos[p];
-     let classColor = "", catName = "", priority = 99;
-     let pctPos = m.totalItems === 0 ? 0 : Math.round((m.validadosItems / m.totalItems) * 100);
-     
-     if (m.hasFaltante && m.hasSobrante) { catName = "MIXTO (Falt/Sob)"; classColor = "var(--orange)"; priority = 1; }
-     else if (m.hasFaltante) { catName = "FALTANTES"; classColor = "var(--danger)"; priority = 2; }
-     else if (m.hasSobrante) { catName = "SOBRANTES"; classColor = "var(--warning)"; priority = 3; }
-     else if (pctPos < 100 || m.hasPendiente) { catName = "EN PROCESO"; classColor = "var(--secondary)"; priority = 4; }
-     else { catName = "COMPLETADAS"; classColor = "var(--success)"; priority = 5; }
-
-     posicionesArray.push({ nombre: p, categoria: catName, color: classColor, prioridad: priority, avance: pctPos });
-  }
-
-  let pct = totalRef === 0 ? 0 : Math.round((cerradasRef / totalRef) * 100);
-  return { exito: true, posiciones: posicionesArray.sort((a,b) => a.prioridad - b.prioridad || a.nombre.localeCompare(b.nombre)), avance: pct, textoAvance: `${cerradasRef} / ${totalRef} Refs` };
-}
-
-function obtenerDatosPosicion(pos) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-  const target = String(pos).trim().toUpperCase();
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { exito: true, items: [], posicion: target };
-  const dataValues = sheet.getRange(2, 1, lastRow - 1, 28).getValues();
-  const items = [];
-  for (let i = 0; i < dataValues.length; i++) {
-    if (String(dataValues[i][14]).trim().toUpperCase() === target) {
-      const rowVals = dataValues[i];
-      let step = 1;
-      if(rowVals[21] !== "") step=2; if(rowVals[22] !== "") step=3; if(rowVals[23] !== "") step=4;
-      items.push({
-        row: i + 2, codigo: rowVals[6], desc: rowVals[7], serie: rowVals[8], lote: rowVals[9],
-        nDespacho: rowVals[10], nPartida: rowVals[11], cat: rowVals[12], est: rowVals[13], depot: rowVals[16],
-        c1: rowVals[21], c2: rowVals[22], c3: rowVals[23], nextStep: step, estado: rowVals[19], obs: rowVals[27]
-      });
-    }
-  }
-  return { exito: true, items: items, posicion: target };
-}
-
-function buscarUbicacionesPorSku(sku) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-  const finder = sheet.getRange("G:G").createTextFinder(String(sku).trim().toUpperCase()).matchEntireCell(true).findAll();
-  const map = {};
-  finder.forEach(cell => { 
-     const row = cell.getRow();
-     if (row < 2) return;
-     const vals = sheet.getRange(row, 15, 1, 6).getValues()[0];
-     const p = String(vals[0]).trim().toUpperCase(); 
-     if (p) {
-        const dif = parseFloat(vals[4]) || 0;
-        const est = String(vals[5]).trim().toUpperCase();
-        if(!map[p]) map[p] = { pos: p, dif: 0, est: est };
-        map[p].dif += dif; 
-        if (est !== "CORRECTO" && est !== "PENDIENTE" && est !== "") map[p].est = est; 
-     }
-  });
-  return Object.values(map);
-}
-
-function guardarConteoFila(row, cantidad, observacion, usuarioManual) {
-  const lock = LockService.getScriptLock();
-  try { 
-      lock.waitLock(12000); 
-      const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-      let resConteo = { c1:"", c2:"", c3:"", nextStep: 1, exito: true, estado: "PENDIENTE" };
-      if (cantidad !== null && cantidad !== undefined && cantidad !== "") {
-          const vals = sheet.getRange(row, 22, 1, 3).getValues()[0];
-          let targetCol = 0, conteoNum = 1;
-          if (vals[0] === "" || vals[0] === null) { targetCol = 22; conteoNum = 1; }
-          else if (vals[1] === "" || vals[1] === null) { targetCol = 23; conteoNum = 2; }
-          else if (vals[2] === "" || vals[2] === null) { targetCol = 24; conteoNum = 3; }
-          else { return { exito: false, requiereAjuste: true }; }
-
-          sheet.getRange(row, targetCol).setValue(cantidad);
-          let usuarioFinal = usuarioManual || Session.getActiveUser().getEmail();
-          registrarAuditoria(sheet, row, cantidad, targetCol, "Conteo " + conteoNum, usuarioFinal);
-          SpreadsheetApp.flush(); 
-          
-          const newVals = sheet.getRange(row, 22, 1, 3).getValues()[0];
-          if (newVals[0]!=="") resConteo.nextStep=2;
-          if (newVals[1]!=="") resConteo.nextStep=3; if (newVals[2]!=="") resConteo.nextStep=4;
-          resConteo.c1=newVals[0]; resConteo.c2=newVals[1]; resConteo.c3=newVals[2];
-          resConteo.estado = String(sheet.getRange(row, 20).getValue()).trim().toUpperCase();
-      }
-      if (observacion !== undefined && observacion !== null) sheet.getRange(row, 28).setValue(observacion);
-      
-      verificarConfiguracionInicial(sheet); // Verificación automática
-      notificarCambioBD(); return resConteo;
-  } catch(e) { return { exito: false, mensaje: "Celda ocupada, reintente." }; 
-  } finally { lock.releaseLock(); }
-}
-
-function guardarConteoMasivo(listaCambios, emailOperario) {
-  const lock = LockService.getScriptLock();
-  try { 
-      lock.waitLock(15000);
-      const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-      const lastRow = sheet.getLastRow();
-      if (lastRow < 2) return { exito: false, mensaje: "Hoja vacía" }; 
-
-      let emailFinal = emailOperario || Session.getActiveUser().getEmail();
-      let nombreOperario = USUARIOS_MAP[emailFinal] ? USUARIOS_MAP[emailFinal] : (emailFinal.split('@')[0] || "Operador");
-
-      const rangoConteos = sheet.getRange(2, 22, lastRow - 1, 3);
-      const valoresMatriz = rangoConteos.getValues(); 
-      const auditoria = []; const timestamp = new Date();
-      listaCambios.forEach(item => {
-        const arrayIdx = item.row - 2; 
-        if (arrayIdx >= 0 && arrayIdx < valoresMatriz.length) {
-           let rowVals = valoresMatriz[arrayIdx];
-           let targetColIndex = -1, conteoNum = 1;
-           if (rowVals[0] === "" || rowVals[0] === null) { targetColIndex = 0; conteoNum = 1; }
-           else if (rowVals[1] === "" || rowVals[1] === null) { targetColIndex = 1; conteoNum = 2; }
-           else if (rowVals[2] === "" || rowVals[2] === null) { targetColIndex = 2; conteoNum = 3; }
-           
-           if (targetColIndex !== -1 && item.val !== "") {
-             valoresMatriz[arrayIdx][targetColIndex] = item.val; 
-             if(item.obs) sheet.getRange(item.row, 28).setValue(item.obs);
-             const metaData = sheet.getRange(item.row, 3, 1, 13).getValues()[0]; 
-             auditoria.push([ timestamp, "", "", "", emailFinal, metaData[0], metaData[4], metaData[4], metaData[12], "", "", (targetColIndex===0?item.val:""), (targetColIndex===1?item.val:""), (targetColIndex===2?item.val:""), `Masivo App (${conteoNum})` ]);
-           }
-        }
-      });
-      rangoConteos.setValues(valoresMatriz);
-      if(auditoria.length > 0) {
-         const regSheet = sheet.getParent().getSheetByName('REGISTRO');
-         if(regSheet) { 
-           const startRow = regSheet.getLastRow() + 1;
-           regSheet.getRange(startRow, 1, auditoria.length, 15).setValues(auditoria);
-           regSheet.getRange(startRow, 4, auditoria.length, 1).setValues(auditoria.map(() => [nombreOperario]));
-         }
-      }
-      SpreadsheetApp.flush(); 
-      verificarConfiguracionInicial(sheet); // Verificación automática
-      notificarCambioBD();
-      return { exito: true, procesados: listaCambios.length };
-  } catch(e) { return { exito: false, mensaje: "Sistema ocupado." };
-  } finally { lock.releaseLock(); }
-}
-
-function validarSerieCompleta(serie) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const shSeries = ss.getSheetByName("PLANILLA DE SERIES FISICAS") || ss.getSheetByName("PLANILLA SERIES");
-  const shFisico = ss.getSheetByName("PLANILLA DE CONTEO FISICO");
-  const serieBuscada = String(serie).trim().toUpperCase();
-  function isFuzzyMatch(a, b) {
-      if (!a || !b) return false;
-      if (a === b) return true;
-      if (Math.abs(a.length - b.length) <= 2 && a.length > 4) { if (a.endsWith(b) || b.endsWith(a)) return true; }
-      return false;
-  }
-
-  let duplicado = false, filaDup = 0, serieEncontradaFinal = serieBuscada;
-  if (shSeries && shSeries.getLastRow() > 1) {
-    const dataSeries = shSeries.getRange(2, 2, shSeries.getLastRow() - 1, 1).getValues();
-    for (let i = 0; i < dataSeries.length; i++) {
-        let dbVal = String(dataSeries[i][0]).trim().toUpperCase();
-        if (isFuzzyMatch(serieBuscada, dbVal)) { duplicado = true; filaDup = i + 2; serieEncontradaFinal = dbVal; break; }
-    }
-  }
-
-  let datos = { sku: "SIN_DATOS", desc: "No registrado", pos: "---" }, encontrado = false;
-  if (!duplicado && shFisico && shFisico.getLastRow() > 1) {
-    const dataFis = shFisico.getRange(2, 7, shFisico.getLastRow() - 1, 9).getValues();
-    for (let i = 0; i < dataFis.length; i++) {
-        let dbSerie = String(dataFis[i][2]).trim().toUpperCase();
-        if (isFuzzyMatch(serieBuscada, dbSerie)) {
-            encontrado = true; serieEncontradaFinal = dbSerie;
-            datos = { sku: String(dataFis[i][0]).trim(), desc: String(dataFis[i][1]).trim(), pos: String(dataFis[i][8]).trim() };
-            break;
-        }
-    }
-  }
-  return { duplicado: duplicado, fila: filaDup, encontrado: encontrado, datos: datos, serieReal: serieEncontradaFinal };
-}
-
-function obtenerHistorialSeries(pos) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const shSeries = ss.getSheetByName("PLANILLA DE SERIES FISICAS") || ss.getSheetByName("PLANILLA SERIES");
-  if (!shSeries) return [];
-
-  const targetPos = String(pos || "").trim().toUpperCase();
-  const historial = [];
-  if (!targetPos) {
-    const lastRow = shSeries.getLastRow();
-    if (lastRow < 2) return [];
-    const startRow = Math.max(2, lastRow - 50); 
-    const data = shSeries.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
-    for(let i = data.length - 1; i >= 0; i--) {
-        if(data[i][1]) historial.push({ serie: data[i][1], sku: data[i][3], pos: data[i][4], desc: "Registrado" });
-    }
-    return historial;
-  }
-
-  const finder = shSeries.getRange("E:E").createTextFinder(targetPos).matchEntireCell(true).findAll();
-  finder.reverse().slice(0,50).forEach(cell => {
-    const row = cell.getRow(); if(row < 2) return;
-    historial.push({ serie: cell.offset(0, -3).getValue(), sku: cell.offset(0, -1).getValue(), pos: targetPos, desc: "Registrado" });
-  });
-  return historial;
-}
-
-function getLastRowByColumnB(sheet) {
+function actualizarColumnasAC(sheet) { 
   const lr = sheet.getLastRow();
-  if (lr < 1) return 1;
-  const data = sheet.getRange(1, 2, lr, 1).getValues();
-  for (let i = data.length - 1; i >= 0; i--) { if (data[i][0] !== "" && data[i][0] !== null) return i + 1; }
-  return 1; 
+  if (lr < 3) return;
+  const vals = sheet.getRange("A2:C2").getValues()[0];
+  if (vals[0]) sheet.getRange(3, 1, lr - 2, 1).setValue(vals[0]); 
+  if (vals[2]) sheet.getRange(3, 3, lr - 2, 1).setValue(vals[2]); 
 }
 
-function procesarGuardadoInventario(datos, datosHallazgo, usuarioOperador) {
-  const lock = LockService.getScriptLock();
-  try { 
-      lock.waitLock(15000); 
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const shFisico = ss.getSheetByName("PLANILLA DE CONTEO FISICO");
-      let shSeries = ss.getSheetByName("PLANILLA DE SERIES FISICAS") || ss.getSheetByName("PLANILLA SERIES");
-      const shRegistro = ss.getSheetByName("REGISTRO");
-      const shAlterna = ss.getSheetByName("PLANILLA ALTERNA");
-      let realLastRow = getLastRowByColumnB(shSeries);
-      let maxSeq = 0;
-      if (realLastRow > 1) {
-        const ids = shSeries.getRange(2, 1, realLastRow - 1, 1).getValues();
-        ids.forEach(r => { const s = Number(r[0]); if (!isNaN(s) && s > maxSeq) maxSeq = s; });
-      }
-
-      const seriesExistentes = new Set();
-      const dataSeries = shSeries.getRange(2, 2, realLastRow || 1, 1).getValues();
-      dataSeries.forEach(r => { if(r[0]) seriesExistentes.add(String(r[0]).trim().toUpperCase()); });
-
-      const mapaSeriesRow = {};
-      if (shFisico.getLastRow() > 1) {
-        const dataFisico = shFisico.getRange(2, 3, shFisico.getLastRow()-1, 18).getValues();
-        dataFisico.forEach((r, i) => { if(r[6]) mapaSeriesRow[String(r[6]).trim().toUpperCase()] = { fila: i + 2, id: r[0], cliente: r[2], sku: r[4], pos: r[12], estado: r[17] }; });
-      }
-
-      const registrosAB = [], registrosDEF = [];
-      const registrosAlterna = [], logAuditoria = [], conteosSumar = {}, duplicados = [];
-      const user = usuarioOperador || Session.getActiveUser().getEmail();
-      const timestamp = new Date();
-
-      datos.forEach(item => {
-        const serie = String(item.serie).trim().toUpperCase(), pos = String(item.posicion).trim();
-        let sku = item.producto; 
-
-        if (seriesExistentes.has(serie)) {
-          duplicados.push(serie);
-        } else {
-          maxSeq++; seriesExistentes.add(serie);
-          let logId = "SERIE_ADD", logCliente = "APP_WMS", logSku = sku, logPos = pos, logEstado = "PENDIENTE";
-
-          registrosAB.push([maxSeq, serie]);
-          registrosDEF.push([sku, pos, user]); 
-          
-          if (mapaSeriesRow[serie]) {
-            const info = mapaSeriesRow[serie];
-            conteosSumar[info.fila] = (conteosSumar[info.fila] || 0) + 1;
-            logId = info.id; logCliente = info.cliente; logSku = info.sku; logPos = info.pos; logEstado = info.estado; sku = info.sku; 
-          } else if (item.esDesconocido && datosHallazgo && shAlterna) {
-            registrosAlterna.push([timestamp, user, "", datosHallazgo.sku, datosHallazgo.desc, serie, "", pos, 1, "", "", datosHallazgo.obs || "Hallazgo", datosHallazgo.justificacion]);
-            logEstado = "HALLAZGO"; sku = datosHallazgo.sku;
-          }
-          logAuditoria.push([timestamp, "", "", "", user, logId, logCliente, logSku, logPos, 1, logEstado, 1, "", "", serie]);
-        }
-      });
-
-      if (registrosAB.length > 0) {
-         if (realLastRow + registrosAB.length > shSeries.getMaxRows()) shSeries.insertRowsAfter(shSeries.getMaxRows(), registrosAB.length + 20);
-         shSeries.getRange(realLastRow + 1, 1, registrosAB.length, 2).setValues(registrosAB);
-         shSeries.getRange(realLastRow + 1, 4, registrosDEF.length, 3).setValues(registrosDEF);
-      }
-      
-      if (registrosAlterna.length > 0) shAlterna.getRange(shAlterna.getLastRow()+1, 1, registrosAlterna.length, 13).setValues(registrosAlterna);
-      if (logAuditoria.length > 0) { const r = shRegistro; r.getRange(r.getLastRow()+1, 1, logAuditoria.length, 15).setValues(logAuditoria); }
-
-      if (Object.keys(conteosSumar).length > 0) {
-        for (const [fila, cantidadASumar] of Object.entries(conteosSumar)) {
-          const vals = shFisico.getRange(Number(fila), 22, 1, 3).getValues()[0];
-          let targetCol = 22; if(vals[0]==="") targetCol=22; else if(vals[1]==="") targetCol=23; else targetCol=24; 
-          shFisico.getRange(Number(fila), targetCol).setValue(1);
-        }
-      }
-
-      verificarConfiguracionInicial(shFisico); // Verificación automática
-      SpreadsheetApp.flush(); notificarCambioBD();
-      return { exito: true, guardados: registrosAB.length, alternaGuardados: registrosAlterna.length, duplicados: duplicados };
-  } catch(e) { return { exito: false, mensaje: "Servidor ocupado." }; 
-  } finally { lock.releaseLock(); }
+function generarSecuenciaColumnaD(sheet) { 
+  const lr = sheet.getLastRow(); 
+  if (lr < 2) return; 
+  // La columna D genera secuencia SIEMPRE Y CUANDO haya un código en G
+  const codigos = sheet.getRange(2, 7, lr - 1, 1).getValues(); 
+  let x = 1;
+  const secuencia = codigos.map(r => (r[0] && String(r[0]).trim() !== "") ? [x++] : [""]);
+  sheet.getRange(2, 4, secuencia.length, 1).setValues(secuencia);
 }
 
-function guardarPlanillaAlternaCompleta(data, usuarioOperador) {
-  const shAlt = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA ALTERNA");
-  const user = usuarioOperador || Session.getActiveUser().getEmail();
-  shAlt.getRange(shAlt.getLastRow()+1, 1, 1, 13).setValues([[new Date(), user, "", data.codigo, data.desc, data.serie, data.lote, data.posicion, data.cantidad, "", "", data.obs, data.justificacion]]);
-  notificarCambioBD();
-  return { mensaje: "Alterna guardada correctamente" };
+function verificarYActualizarColumnaB(sheet) {
+  const r = sheet.getParent().getSheetByName("REGISTRO");
+  if (!r || r.getLastRow() < 2) return;
+  
+  // Buscar el último registro (fecha/hora) en la columna A de REGISTRO
+  const data = r.getRange(2, 1, r.getLastRow() - 1, 1).getValues();
+  let ultimaFecha = ""; 
+  for(let i = data.length - 1; i >= 0; i--) {
+    if(data[i][0]) { ultimaFecha = data[i][0]; break; }
+  }
+  
+  // Pegar en toda la columna B de la planilla de conteo
+  if (ultimaFecha && sheet.getLastRow() >= 2) {
+    sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setValue(ultimaFecha);
+  }
 }
 
-function obtenerDatosAnalisis() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-  if(!sheet) return { exito: false };
-
-  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 20).getValues();
-  let qFisicaTotal = 0, qTeoricaTotal = 0, uCorrectas = 0, uContadasTeoricas = 0;
-  let allRefs = new Set(), allPos = new Set(); 
-  let refsCounted = new Set(), refsCorrect = new Set(), refsError = new Set();
-  let posCounted = new Set(), posCorrect = new Set(), posError = new Set();
-  let discrepancias = [];
-  for(let r of data) {
-    let sku = String(r[6]).trim(), desc = String(r[7]).trim(), pos = String(r[14]).trim();
+function consolidarDatos(sheet) {
+  try {
+    if(!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
+    if(!sheet) return; 
+    const lr = sheet.getLastRow(); 
+    if(lr < 2) return;
     
-    // OPTIMIZACIÓN CLAVE: Si la fila tiene el SKU vacío, la salta inmediatamente
-    if (!sku || sku === "" || sku.toUpperCase() === "UNDEFINED") continue;
-
-    let qTeo = parseFloat(r[16]) || 0, qFis = parseFloat(r[17]) || 0, qDif = parseFloat(r[18]) || 0;
-    let estado = String(r[19]).trim().toUpperCase(), categoria = String(r[12]).trim().toUpperCase(); 
-
-    if(categoria === "DIF_INV") continue;
-
-    allRefs.add(sku); allPos.add(pos);
-    qTeoricaTotal += qTeo;
-    qFisicaTotal += qFis;
-
-    if (estado !== "PENDIENTE" && estado !== "") {
-       refsCounted.add(sku); posCounted.add(pos);
-       uContadasTeoricas += qTeo; 
-       
-       if (estado === "CORRECTO") { uCorrectas += qFis; refsCorrect.add(sku); posCorrect.add(pos); } 
-       else if (estado === "FALTANTE" || estado === "SOBRANTE") {
-         refsError.add(sku); posError.add(pos);
-         if (estado === "SOBRANTE") uCorrectas += qTeo;
-         if (estado === "FALTANTE") uCorrectas += qFis;
-         discrepancias.push({ sku: sku, desc: desc, pos: pos, qTeo: qTeo, qFis: qFis, dif: qDif, estado: estado });
-       }
+    // Validar ABC desde Google Drive
+    const f = DriveApp.getFilesByName("ABC2026.txt");
+    if(f.hasNext()){
+      const json = JSON.parse(f.next().getBlob().getDataAsString("UTF-8").replace(/^\uFEFF/,""));
+      const vals = sheet.getRange(2, 7, lr - 1, 1).getValues().map(r => [json[String(r[0]).trim()] || ""]);
+      sheet.getRange(2, 6, vals.length, 1).setValues(vals); // Columna F
     }
-  }
-
-  refsError.forEach(sku => refsCorrect.delete(sku));
-  posError.forEach(pos => posCorrect.delete(pos));
-  return {
-    exito: true,
-    kpis: {
-      efectividadUnidades: qTeoricaTotal === 0 ? 0 : ((uCorrectas / qTeoricaTotal) * 100).toFixed(1),
-      efectividadRef: refsCounted.size === 0 ? 0 : ((refsCorrect.size / refsCounted.size) * 100).toFixed(1),
-      efectividadPos: posCounted.size === 0 ? 0 : ((posCorrect.size / posCounted.size) * 100).toFixed(1),
-      uniValidadas: uContadasTeoricas, uniTotal: qTeoricaTotal,
-      refValidadas: refsCounted.size, refTotal: allRefs.size,
-      posValidadas: posCounted.size, posTotal: allPos.size
-    },
-    discrepancias: discrepancias.sort((a,b) => a.pos.localeCompare(b.pos))
-  };
+  } catch(e) {}
 }
 
-function registrarAjusteInventario(row, motivo, justif, cantidadAjuste, usuarioOperador) {
+function forzarInicializacionManual() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-  if (cantidadAjuste !== "") sheet.getRange(row, 25).setValue(cantidadAjuste); 
-  if (motivo !== "") sheet.getRange(row, 26).setValue(motivo);     
-  if (justif !== "") sheet.getRange(row, 27).setValue(justif);
-  registrarAuditoria(sheet, row, 0, 99, `AJUSTE [${cantidadAjuste}]: ${motivo} - ${justif}`, usuarioOperador);
-  notificarCambioBD();
+  if (sheet) {
+    verificarConfiguracionInicial(sheet);
+    generarSecuenciaColumnaD(sheet);
+    verificarYActualizarColumnaB(sheet);
+    consolidarDatos(sheet);
+  }
+  SpreadsheetApp.getUi().alert("✅ Datos Inicializados y Sincronizados.");
 }
 
+// ==========================================
+// 4. MOTOR DE DESPERTAR Y PAUSA (3 HORAS)
+// ==========================================
+function despertarSistemaYActualizar(sheet) {
+  const prop = PropertiesService.getScriptProperties();
+  
+  // Se registra la hora exacta del último conteo
+  prop.setProperty('WMS_LAST_INTERACTION', Date.now().toString());
+  prop.setProperty('WMS_SYSTEM_SLEEPING', 'false');
+
+  try {
+    // Al realizar un conteo, forzamos actualización de análisis y ABC de inmediato
+    actualizarAnalisis();
+    consolidarDatos(sheet);
+    actualizarRegistro();
+  } catch (err) {}
+}
+
+function rutinaDeFondoMaestra() {
+  const prop = PropertiesService.getScriptProperties();
+  const lastActivity = parseInt(prop.getProperty('WMS_LAST_INTERACTION')) || 0;
+  const now = Date.now();
+  
+  // Calcular horas de inactividad
+  const horasInactividad = (now - lastActivity) / (1000 * 60 * 60);
+  const estaDormido = prop.getProperty('WMS_SYSTEM_SLEEPING') === 'true';
+
+  // 1. CONDICIÓN DE PAUSA: Si no ha habido conteos en más de 3 horas
+  if (horasInactividad >= 3) {
+    if (!estaDormido) {
+      // Hace una actualización final profunda y se va a dormir
+      actualizarAnalisis();
+      actualizarRegistro();
+      prop.setProperty('WMS_SYSTEM_SLEEPING', 'true');
+    }
+    return; // Termina la ejecución para no gastar cuota de Google
+  }
+
+  // 2. MIENTRAS ESTÉ ACTIVO (Menos de 3 horas desde el último conteo)
+  actualizarAnalisis();
+  consolidarDatos();
+  actualizarRegistro();
+}
+
+// ==========================================
+// 5. REGISTRO Y AUDITORÍA
+// ==========================================
 function registrarAccionManual(e, sheet, row, col) { 
-  if (e.range.getValue() !== "") {
+  if (e.value !== "" && e.value !== undefined) {
     let userEmail = (e.user && e.user.getEmail()) ? e.user.getEmail() : Session.getActiveUser().getEmail();
-    if (!userEmail || userEmail === "") userEmail = "Edicion Directa Hoja (Excel)";
-    registrarAuditoria(sheet, row, e.range.getValue(), col, "Manual UI", userEmail);
+    if (!userEmail || userEmail === "") userEmail = "Edicion Directa Hoja";
+    registrarAuditoria(sheet, row, e.value, col, "Conteo Manual", userEmail);
   }
 }
 
-function registrarAuditoria(sheet, row, cantidad, colIndex, obs, usuarioForzado) {
+function registrarAuditoria(sheet, row, cantidad, colIndex, obs, userEmail) {
   const regSheet = sheet.getParent().getSheetByName('REGISTRO');
   if(!regSheet) return;
   const vals = sheet.getRange(row, 1, 1, 20).getValues()[0], nextRow = regSheet.getLastRow() + 1;
-  let user = usuarioForzado || Session.getActiveUser().getEmail() || "USUARIO_DESCONOCIDO";
-  regSheet.getRange(nextRow, 1, 1, 15).setValues([[new Date(), "", "", "", user, vals[2], vals[4], vals[6], vals[14], vals[17], vals[19], (colIndex===22?cantidad:""), (colIndex===23?cantidad:""), (colIndex===24?cantidad:""), obs]]);
+  let nombreUsuario = USUARIOS_MAP[userEmail] ? USUARIOS_MAP[userEmail] : (userEmail.split('@')[0] || "Operador");
+
+  regSheet.getRange(nextRow, 1, 1, 15).setValues([[
+    new Date(), "", "", "", nombreUsuario, 
+    vals[2], vals[4], vals[6], vals[14], vals[17], vals[19], 
+    (colIndex===22 ? cantidad : ""), (colIndex===23 ? cantidad : ""), (colIndex===24 ? cantidad : ""), obs
+  ]]);
   procesarEdicionRegistro(regSheet, nextRow);
 }
 
 function procesarEdicionRegistro(sheet, row) {
-  const vals = sheet.getRange(row, 1, 1, 5).getValues()[0], ts = vals[0], email = vals[4];
+  const ts = sheet.getRange(row, 1).getValue();
   if (ts instanceof Date) {
     const tz = "America/Guayaquil";
     sheet.getRange(row, 2).setValue(Utilities.formatDate(ts, tz, "dd/MM/yy"));
     sheet.getRange(row, 3).setValue(Utilities.formatDate(ts, tz, "HH:mm:ss"));
   }
-  if (email && USUARIOS_MAP[email]) {
-    sheet.getRange(row, 4).setValue(USUARIOS_MAP[email]);
-  } else if (email && email !== "") {
-    sheet.getRange(row, 4).setValue(email.split('@')[0]);
-  }
+}
+function actualizarRegistro(){ 
+  const s = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("REGISTRO"); 
+  if(s){ for(let i=2; i<=s.getLastRow(); i++) procesarEdicionRegistro(s,i); } 
 }
 
-function actualizarColumnasAC(s){ 
-  const d=s.getRange("A2:C2").getValues()[0]; const lr=s.getLastRow();
-  if(lr>2 && (d[0]||d[2])) { s.getRange(3,1,lr-2,1).setValue(d[0]); s.getRange(3,3,lr-2,1).setValue(d[2]); } 
-}
-
-function generarSecuenciaColumnaD(s){ 
-  const lr=s.getLastRow(); if(lr<2)return; const d=s.getRange("G2:G"+lr).getValues(); let x=1; 
-  s.getRange(2,4,d.length,1).setValues(d.map(r=>r[0]?[x++]:[""]));
-}
-
-function consolidarDatos(){
-  const s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
-  if(!s)return; const lr=s.getLastRow(); if(lr<2)return;
-  const f=DriveApp.getFilesByName("ABC2026.txt");
-  if(f.hasNext()){
-    try {
-      const json=JSON.parse(f.next().getBlob().getDataAsString("UTF-8").replace(/^\uFEFF/,""));
-      const vals=s.getRange(2,7,lr-1,1).getValues().map(r=>[json[String(r[0]).trim()]||""]);
-      s.getRange(2,6,vals.length,1).setValues(vals);
-    } catch(e){ Logger.log("Error JSON ABC"); }
-  }
-}
-
-function verificarYActualizarColumnaB(s){
-  if(!s)s=SpreadsheetApp.getActiveSheet();
-  const r=s.getParent().getSheetByName("REGISTRO");
-  if(!r || r.getLastRow()<2) return;
-  const data=r.getRange("A2:A"+r.getLastRow()).getValues();
-  let v=""; for(let i=data.length-1;i>=0;i--){if(data[i][0]){v=data[i][0];break;}}
-  if(v && s.getLastRow()>=2) s.getRange(2,2,s.getLastRow()-1,1).setValue(v);
-}
-
-function actualizarRegistro(){ const s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName("REGISTRO"); if(s){ for(let i=2;i<=s.getLastRow();i++) procesarEdicionRegistro(s,i); } }
-
+// ==========================================
+// 6. MOTOR DE ANÁLISIS
+// ==========================================
 function actualizarAnalisis() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const planilla = ss.getSheetByName("PLANILLA DE CONTEO FISICO");
@@ -674,26 +285,25 @@ function actualizarAnalisis() {
   const lastCol = planilla.getLastColumn();
   if (lastRow < 2) return;
   const values = planilla.getRange(2, 1, lastRow - 1, lastCol).getValues();
-  const codigosUnicos = new Set();
-  const posicionesUnicas = new Set();
-  const codigosEstado = {};
-  const posicionesEstado = {};
+  const codigosUnicos = new Set(), posicionesUnicas = new Set();
+  const codigosEstado = {}, posicionesEstado = {};
 
   let sumQ = 0, sumR = 0, unidadesCorrectas = 0, totalSobrantes = 0, totalFaltantes = 0;
+  
   for (const row of values) {
-    const codigo = row[6];      
-    if (!codigo || codigo === "" || codigo.toString().toUpperCase() === "UNDEFINED") continue; // Optimización de celdas en blanco
+    const codigo = row[6];
+    if (!codigo || codigo === "" || codigo.toString().toUpperCase() === "UNDEFINED") continue;
 
     const categoria = (row[12] || "").toString().trim().toUpperCase();
-    const posicion = row[14];   
+    const posicion = row[14];
     const qVal = parseFloat(row[16]) || 0; 
     const rVal = parseFloat(row[17]) || 0;
-    const sVal = parseFloat(row[18]) || 0; 
+    const sVal = parseFloat(row[18]) || 0;
     const resultado = (row[19] || "").toString().trim().toUpperCase(); 
 
     if (categoria === "DIF_INV") continue;
 
-    if (codigo) codigosUnicos.add(codigo);
+    codigosUnicos.add(codigo);
     if (posicion) posicionesUnicas.add(posicion);
     sumQ += qVal;
     sumR += rVal;
@@ -702,7 +312,7 @@ function actualizarAnalisis() {
     else if (resultado === "SOBRANTE") { unidadesCorrectas += qVal; totalSobrantes += Math.max(0, rVal - qVal); } 
     else if (resultado === "FALTANTE") { unidadesCorrectas += rVal; totalFaltantes += sVal; }
 
-    if (codigo) { if (!codigosEstado[codigo]) codigosEstado[codigo] = new Set(); codigosEstado[codigo].add(resultado); }
+    if (!codigosEstado[codigo]) codigosEstado[codigo] = new Set(); codigosEstado[codigo].add(resultado);
     if (posicion) { if (!posicionesEstado[posicion]) posicionesEstado[posicion] = new Set(); posicionesEstado[posicion].add(resultado); }
   }
 
@@ -739,110 +349,4 @@ function actualizarAnalisis() {
   analisis.getRange("N24").setValue(posicionesFaltantes);
   analisis.getRange("O24").setValue(posicionesSobrantes);
   analisis.getRange("M24").setValue(posicionesSobrantes + posicionesFaltantes);
-}
-
-/*function crearTriggerAutomatico() {
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(t => { if(t.getHandlerFunction() === "rutinaAutomaticaMaestra") ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger("rutinaAutomaticaMaestra").timeBased().everyHours(1).create();
-  SpreadsheetApp.getUi().alert("Trigger automático maestro configurado (Ejecución cada hora).");
-}*/
-
-// Intenta crear el trigger (Fallará en onEdit manual, pero sirve para la Interfaz HTML)
-function crearTriggerMaestroInterno() {
-  const triggers = ScriptApp.getProjectTriggers();
-  const yaExiste = triggers.some(t => t.getHandlerFunction() === "rutinaAutomaticaMaestra");
-  if (!yaExiste) {
-    ScriptApp.newTrigger("rutinaAutomaticaMaestra").timeBased().everyHours(1).create();
-  }
-}
-
-// Este es el botón "Gatillo" del menú que el operario tocará una vez
-function crearTriggerAutomatico() {
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(t => { if(t.getHandlerFunction() === "rutinaAutomaticaMaestra") ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger("rutinaAutomaticaMaestra").timeBased().everyHours(1).create();
-  SpreadsheetApp.getUi().alert("✅ Motor Automático Activado.\n\nEl análisis se actualizará cada hora y el ABC dos veces al día.");
-  
-  // Como ya lo activó, forzamos un primer análisis
-  actualizarAnalisis();
-}
-
-// =========================================================================
-// NUEVAS ADICIONES: MOTOR DE AUTOMATIZACIÓN AVANZADA
-// =========================================================================
-
-function verificarConfiguracionInicial(sheet) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(3000);
-    const a2 = sheet.getRange("A2").getValue();
-    
-    // Si la celda A2 está vacía, se asume el primer conteo del inventario completo
-    if (!a2 || a2 === "") {
-      const ss = sheet.getParent();
-      
-      // 1. Escribir metadatos iniciales de cabecera en fila 2
-      sheet.getRange("A2").setValue(new Date());
-      sheet.getRange("C2").setValue(ss.getName()); 
-      
-      // 2. Propagar datos hacia abajo (se salta las protecciones de celda por ejecutar de lado del Deployer)
-      actualizarColumnasAC(sheet);
-      generarSecuenciaColumnaD(sheet);
-      
-      // 3. Registrar interacción y levantar triggers
-      PropertiesService.getScriptProperties().setProperty('WMS_LAST_INTERACTION', Date.now().toString());
-      crearTriggerMaestroInterno();
-    }
-  } catch(e) {} finally { lock.releaseLock(); }
-}
-
-/*function crearTriggerMaestroInterno() {
-  const triggers = ScriptApp.getProjectTriggers();
-  const yaExiste = triggers.some(t => t.getHandlerFunction() === "rutinaAutomaticaMaestra");
-  if (!yaExiste) {
-    ScriptApp.newTrigger("rutinaAutomaticaMaestra").timeBased().everyHours(1).create();
-  }
-}*/
-
-function rutinaAutomaticaMaestra() {
-  const prop = PropertiesService.getScriptProperties();
-  const lastActivity = parseInt(prop.getProperty('WMS_LAST_INTERACTION')) || 0;
-  const now = Date.now();
-  const horasInactividad = (now - lastActivity) / (1000 * 60 * 60);
-  const estaDormido = prop.getProperty('WMS_SYSTEM_SLEEPING') === 'true';
-
-  // CONTROL DE APAGADO: Si pasan 4 horas o más sin operarios logueados
-  if (horasInactividad >= 4) {
-    if (!estaDormido) {
-      // Realiza las funciones por última vez antes de suspenderse
-      actualizarAnalisis();
-      actualizarRegistro();
-      prop.setProperty('WMS_SYSTEM_SLEEPING', 'true');
-    }
-    return; // Cancela ejecuciones posteriores para no consumir cuotas innecesarias
-  }
-
-  // Si hay actividad, se asegura de mantener el estado encendido
-  prop.setProperty('WMS_SYSTEM_SLEEPING', 'false');
-
-  // AUTOMATIZACIÓN 1: Actualizar análisis cada hora
-  actualizarAnalisis();
-
-  // AUTOMATIZACIÓN 2: Actualizar ABC dos veces al día (cada 12 horas)
-  const ultimaActualizacionABC = parseInt(prop.getProperty('WMS_LAST_ABC_UPDATE')) || 0;
-  if ((now - ultimaActualizacionABC) >= (12 * 60 * 60 * 1000)) {
-    consolidarDatos();
-    prop.setProperty('WMS_LAST_ABC_UPDATE', now.toString());
-  }
-}
-
-function despertarSistema() {
-  const prop = PropertiesService.getScriptProperties();
-  prop.setProperty('WMS_LAST_INTERACTION', Date.now().toString());
-  
-  if (prop.getProperty('WMS_SYSTEM_SLEEPING') === 'true' || !prop.getProperty('WMS_SYSTEM_SLEEPING')) {
-    prop.setProperty('WMS_SYSTEM_SLEEPING', 'false');
-    actualizarAnalisis(); // Fuerza cálculo inmediato para los dashboards visuales de los usuarios
-  }
 }
