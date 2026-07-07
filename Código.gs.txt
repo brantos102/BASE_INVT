@@ -13,15 +13,15 @@ const USUARIOS_MAP = {
 };
 
 // ==========================================
-// 1. MENÚ PRINCIPAL
+// 1. MENÚ PRINCIPAL DEL ARCHIVO HIJO
 // ==========================================
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu('⚙️ WMS Automático')
-    .addItem('🚀 1. ACTIVAR ARCHIVO NUEVO (Clic al crear copia)', 'instalarTriggersEnCopia')
+  SpreadsheetApp.getUi().createMenu('⚙️ Inventarios WMS ')
+    .addItem(' ACTIVAR ARCHIVO ', 'instalarTriggersEnCopia')
     .addSeparator()
-    .addItem('▶️ Forzar Inicialización (A,C,D,F)', 'forzarInicializacionManual')
-    .addItem('📊 Actualizar Análisis', 'actualizarAnalisis')
-    .addItem('🔠 Actualizar ABC', 'consolidarDatos')
+    .addItem(' Forzar ', 'forzarInicializacionManual')
+    .addItem(' Actualizar Análisis', 'actualizarAnalisis')
+    .addItem(' Actualizar ABC', 'consolidarDatos')
     .addToUi();
 }
 
@@ -32,7 +32,13 @@ function instalarTriggersEnCopia() {
   // Limpiar para evitar duplicados
   triggers.forEach(t => ScriptApp.deleteTrigger(t));
 
-  // Instalar Trigger de fondo (Revisa cada 30 min si debe trabajar o dormir)
+  // 1. Instalar el "Escuchador" para cuando la WebApp envíe datos
+  ScriptApp.newTrigger("manejadorCambiosExternos")
+    .forSpreadsheet(sheet)
+    .onChange()
+    .create();
+
+  // 2. Instalar el temporizador de fondo (Revisa cada 30 min si debe trabajar o dormir)
   ScriptApp.newTrigger("rutinaDeFondoMaestra")
     .timeBased()
     .everyMinutes(30)
@@ -44,14 +50,46 @@ function instalarTriggersEnCopia() {
 
   SpreadsheetApp.getUi().alert(
     "✅ ¡ARCHIVO ACTIVADO CON ÉXITO!\n\n" +
-    "Los permisos han sido concedidos. El sistema operará automáticamente mientras los operarios trabajen y se pausará tras 3 horas de inactividad."
+    "El sistema ahora está escuchando a la Terminal WMS externa. Actualizará las columnas y análisis automáticamente cuando lleguen los datos."
   );
   
   forzarInicializacionManual();
 }
 
 // ==========================================
-// 2. EL GATILLO PRINCIPAL (DIGITACIÓN DEL OPERARIO)
+// 2. EL GATILLO ESCUCHADOR (Detecta inyecciones de la WebApp)
+// ==========================================
+function manejadorCambiosExternos(e) {
+  try {
+    // Solo actuamos si el cambio es una edición (EDIT) o inyección de un script (OTHER)
+    if (e && e.changeType !== 'EDIT' && e.changeType !== 'OTHER') return;
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName("PLANILLA DE CONTEO FISICO");
+    if (!sheet) return;
+
+    // Despertar el sistema y registrar la hora de la actividad
+    PropertiesService.getScriptProperties().setProperty('WMS_LAST_INTERACTION', Date.now().toString());
+    PropertiesService.getScriptProperties().setProperty('WMS_SYSTEM_SLEEPING', 'false');
+
+    // Ejecutar las automatizaciones inmediatamente tras recibir el dato
+    verificarConfiguracionInicial(sheet); // Inicializa A y C
+    verificarYActualizarColumnaB(sheet);  // Trae última hora de REGISTRO a Col B
+    generarSecuenciaColumnaD(sheet);      // Genera secuencia D en base a G
+    
+    // El ABC (F) se llama aquí si está vacío. (Si no, lo hará la rutina de fondo)
+    const f2 = sheet.getRange("F2").getValue();
+    if (!f2 || f2.toString().trim() === "") consolidarDatos(sheet);
+
+    // Actualiza los cálculos y la hoja de Análisis
+    actualizarAnalisis();
+    
+  } catch(err) {}
+}
+
+
+// ==========================================
+// 3. PROTECCIONES MANUALES EN EL ARCHIVO
 // ==========================================
 function onEdit(e) {
   try {
@@ -59,7 +97,6 @@ function onEdit(e) {
     const sheet = e.range.getSheet(), name = sheet.getName(), row = e.range.getRow(), col = e.range.getColumn();
     if (row < 2) return;
 
-    // A) PROTECCIÓN DE REGISTRO
     if (name === "REGISTRO") {
        SpreadsheetApp.getUi().alert("⛔ ALERTA DE SEGURIDAD\n\nEl registro de auditoría es INALTERABLE.");
        if (e.oldValue !== undefined) { e.range.setValue(e.oldValue); } else { e.range.clearContent(); }
@@ -67,8 +104,7 @@ function onEdit(e) {
     }
 
     if (name === "PLANILLA DE CONTEO FISICO") {
-      
-      // B) PROTECCIÓN COLUMNA B
+      // Proteger Columna B
       if (col === 2) { 
         if (e.value !== "" && e.value !== null && e.value !== undefined) {
           SpreadsheetApp.getUi().alert("⛔ ACCIÓN DENEGADA\n\nLa Columna B es automática (Fecha del último registro).");
@@ -77,51 +113,52 @@ function onEdit(e) {
         return;
       }
 
-      // C) COPIAR A Y C SI SE EDITAN MANUALMENTE EN LA FILA 2
+      // Si alguien edita A2 o C2 a mano, lo copiamos abajo
       if (row === 2 && (col === 1 || col === 3)) {
         actualizarColumnasAC(sheet);
         return;
       }
       
-      // D) EL GATILLO DE CONTEO (Columnas V, W, X)
+      // Proteger modificación manual de conteos (V, W, X)
       if ([22, 23, 24].includes(col)) {
-        
-        // 1. Validar que no sobreescriban
         if (e.oldValue !== undefined && e.oldValue !== "" && e.value !== e.oldValue) {
            SpreadsheetApp.getUi().alert(`⛔ CONTEO CERRADO\nNo se pueden modificar conteos registrados.`);
            e.range.setValue(e.oldValue); return;
         }
-
-        // 2. Ejecutar Acciones Principales
+        // Si alguien hizo un conteo a mano en el Excel, lo auditamos y disparamos la actualización
         registrarAccionManual(e, sheet, row, col);
-        verificarYActualizarColumnaB(sheet); // Trae el último registro de REGISTRO a Col B
-        verificarConfiguracionInicial(sheet); // Chequea A y C
-        generarSecuenciaColumnaD(sheet); // Genera secuencia D en base a G
-        
-        // 3. Despertar Sistema e intentar actualizar datos profundos
-        despertarSistemaYActualizar(sheet);
+        manejadorCambiosExternos({changeType: 'EDIT'}); 
       }
     }
   } catch (error) {}
 }
 
 // ==========================================
-// 3. FUNCIONES DE ACTUALIZACIÓN (A, B, C, D, F)
+// 4. FUNCIONES DE ACTUALIZACIÓN (A, B, C, D, F)
 // ==========================================
 function verificarConfiguracionInicial(sheet) {
+  const ss = sheet.getParent();
+  
+  // 1. FORZAR LA ZONA HORARIA DEL ARCHIVO (Soluciona el desfase de +1 hora)
+  ss.setSpreadsheetTimeZone("America/Guayaquil");
+
+  const lr = sheet.getLastRow();
+  if (lr < 2) return;
   const a2 = sheet.getRange("A2").getValue();
   const c2 = sheet.getRange("C2").getValue();
   let modificado = false;
 
+  // Llenar Fila 2 si está vacía
   if (!a2 || a2.toString().trim() === "") {
     sheet.getRange("A2").setValue(new Date());
     modificado = true;
   }
   if (!c2 || c2.toString().trim() === "") {
-    sheet.getRange("C2").setValue(sheet.getParent().getName());
+    sheet.getRange("C2").setValue(ss.getName());
     modificado = true;
   }
   
+  // Propagar A2 y C2 hacia todas las filas de abajo
   if (modificado) {
     actualizarColumnasAC(sheet);
   }
@@ -138,7 +175,7 @@ function actualizarColumnasAC(sheet) {
 function generarSecuenciaColumnaD(sheet) { 
   const lr = sheet.getLastRow(); 
   if (lr < 2) return; 
-  // La columna D genera secuencia SIEMPRE Y CUANDO haya un código en G
+  // Genera secuencia numéricamente siempre y cuando haya código en G
   const codigos = sheet.getRange(2, 7, lr - 1, 1).getValues(); 
   let x = 1;
   const secuencia = codigos.map(r => (r[0] && String(r[0]).trim() !== "") ? [x++] : [""]);
@@ -149,14 +186,14 @@ function verificarYActualizarColumnaB(sheet) {
   const r = sheet.getParent().getSheetByName("REGISTRO");
   if (!r || r.getLastRow() < 2) return;
   
-  // Buscar el último registro (fecha/hora) en la columna A de REGISTRO
+  // Extraer última fecha/hora registrada (Último conteo en V, W o X)
   const data = r.getRange(2, 1, r.getLastRow() - 1, 1).getValues();
   let ultimaFecha = ""; 
   for(let i = data.length - 1; i >= 0; i--) {
     if(data[i][0]) { ultimaFecha = data[i][0]; break; }
   }
   
-  // Pegar en toda la columna B de la planilla de conteo
+  // Propagar esa fecha hacia toda la columna B
   if (ultimaFecha && sheet.getLastRow() >= 2) {
     sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setValue(ultimaFecha);
   }
@@ -169,12 +206,12 @@ function consolidarDatos(sheet) {
     const lr = sheet.getLastRow(); 
     if(lr < 2) return;
     
-    // Validar ABC desde Google Drive
+    // Traer el ABC2026 de Google Drive
     const f = DriveApp.getFilesByName("ABC2026.txt");
     if(f.hasNext()){
       const json = JSON.parse(f.next().getBlob().getDataAsString("UTF-8").replace(/^\uFEFF/,""));
       const vals = sheet.getRange(2, 7, lr - 1, 1).getValues().map(r => [json[String(r[0]).trim()] || ""]);
-      sheet.getRange(2, 6, vals.length, 1).setValues(vals); // Columna F
+      sheet.getRange(2, 6, vals.length, 1).setValues(vals); // Pega en columna F
     }
   } catch(e) {}
 }
@@ -186,28 +223,14 @@ function forzarInicializacionManual() {
     generarSecuenciaColumnaD(sheet);
     verificarYActualizarColumnaB(sheet);
     consolidarDatos(sheet);
+    actualizarAnalisis();
   }
   SpreadsheetApp.getUi().alert("✅ Datos Inicializados y Sincronizados.");
 }
 
 // ==========================================
-// 4. MOTOR DE DESPERTAR Y PAUSA (3 HORAS)
+// 5. MOTOR DE FONDO (3 HORAS PAUSA / DESPIERTO)
 // ==========================================
-function despertarSistemaYActualizar(sheet) {
-  const prop = PropertiesService.getScriptProperties();
-  
-  // Se registra la hora exacta del último conteo
-  prop.setProperty('WMS_LAST_INTERACTION', Date.now().toString());
-  prop.setProperty('WMS_SYSTEM_SLEEPING', 'false');
-
-  try {
-    // Al realizar un conteo, forzamos actualización de análisis y ABC de inmediato
-    actualizarAnalisis();
-    consolidarDatos(sheet);
-    actualizarRegistro();
-  } catch (err) {}
-}
-
 function rutinaDeFondoMaestra() {
   const prop = PropertiesService.getScriptProperties();
   const lastActivity = parseInt(prop.getProperty('WMS_LAST_INTERACTION')) || 0;
@@ -220,22 +243,22 @@ function rutinaDeFondoMaestra() {
   // 1. CONDICIÓN DE PAUSA: Si no ha habido conteos en más de 3 horas
   if (horasInactividad >= 3) {
     if (!estaDormido) {
-      // Hace una actualización final profunda y se va a dormir
+      // Hace una actualización final antes de dormirse para no consumir cuotas inútiles
       actualizarAnalisis();
       actualizarRegistro();
       prop.setProperty('WMS_SYSTEM_SLEEPING', 'true');
     }
-    return; // Termina la ejecución para no gastar cuota de Google
+    return; // Pausado
   }
 
-  // 2. MIENTRAS ESTÉ ACTIVO (Menos de 3 horas desde el último conteo)
+  // 2. MIENTRAS ESTÉ ACTIVO (Hay operarios trabajando)
   actualizarAnalisis();
   consolidarDatos();
   actualizarRegistro();
 }
 
 // ==========================================
-// 5. REGISTRO Y AUDITORÍA
+// 6. REGISTRO Y AUDITORÍA MANUAL (Por si alguien digita en el excel)
 // ==========================================
 function registrarAccionManual(e, sheet, row, col) { 
   if (e.value !== "" && e.value !== undefined) {
@@ -246,9 +269,15 @@ function registrarAccionManual(e, sheet, row, col) {
 }
 
 function registrarAuditoria(sheet, row, cantidad, colIndex, obs, userEmail) {
-  const regSheet = sheet.getParent().getSheetByName('REGISTRO');
+  const ss = sheet.getParent();
+  const regSheet = ss.getSheetByName('REGISTRO');
   if(!regSheet) return;
-  const vals = sheet.getRange(row, 1, 1, 20).getValues()[0], nextRow = regSheet.getLastRow() + 1;
+  
+  // 🕒 SOLUCIÓN HORA: Forzamos la zona horaria de Ecuador en el archivo hijo
+  ss.setSpreadsheetTimeZone("America/Guayaquil");
+
+  const vals = sheet.getRange(row, 1, 1, 20).getValues()[0];
+  const nextRow = regSheet.getLastRow() + 1;
   let nombreUsuario = USUARIOS_MAP[userEmail] ? USUARIOS_MAP[userEmail] : (userEmail.split('@')[0] || "Operador");
 
   regSheet.getRange(nextRow, 1, 1, 15).setValues([[
@@ -256,7 +285,13 @@ function registrarAuditoria(sheet, row, cantidad, colIndex, obs, userEmail) {
     vals[2], vals[4], vals[6], vals[14], vals[17], vals[19], 
     (colIndex===22 ? cantidad : ""), (colIndex===23 ? cantidad : ""), (colIndex===24 ? cantidad : ""), obs
   ]]);
-  procesarEdicionRegistro(regSheet, nextRow);
+  
+  const ts = regSheet.getRange(nextRow, 1).getValue();
+  if (ts instanceof Date) {
+    const tz = "America/Guayaquil";
+    regSheet.getRange(nextRow, 2).setValue(Utilities.formatDate(ts, tz, "dd/MM/yy"));
+    regSheet.getRange(nextRow, 3).setValue(Utilities.formatDate(ts, tz, "HH:mm:ss"));
+  }
 }
 
 function procesarEdicionRegistro(sheet, row) {
@@ -273,7 +308,7 @@ function actualizarRegistro(){
 }
 
 // ==========================================
-// 6. MOTOR DE ANÁLISIS
+// 7. MOTOR DE ANÁLISIS
 // ==========================================
 function actualizarAnalisis() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
