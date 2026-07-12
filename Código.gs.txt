@@ -21,6 +21,10 @@ const ABC_TXT_FALLBACK = "ABC2026.txt"; // respaldo si la hoja maestra no es acc
 // Hoja oculta donde se respaldan las columnas protegidas para poder restaurarlas
 const RESP_SHEET = "_RESP_WMS";
 
+// Medición de tiempos de conteo
+const TIEMPOS_SHEET = "TIEMPOS";
+const PAUSA_MAX_MIN = 10; // un hueco mayor a esto se considera pausa (no conteo real)
+
 // ==========================================
 // 1. MENÚ PRINCIPAL DEL ARCHIVO HIJO
 // ==========================================
@@ -559,6 +563,10 @@ function registrarAuditoria(sheet, row, cantidad, colIndex, obs, userEmail) {
     regSheet.getRange(nextRow, 2).setValue(Utilities.formatDate(ts, tz, "dd/MM/yy"));
     regSheet.getRange(nextRow, 3).setValue(Utilities.formatDate(ts, tz, "HH:mm:ss"));
   }
+
+  // Registrar el tiempo del conteo en la hoja TIEMPOS (usa el inicio marcado por
+  // la Terminal si existe; si es un conteo digitado sin inicio, queda VALIDO=NO).
+  registrarFinConteo(String(vals[6]).trim(), String(vals[14]).trim(), String(vals[4]).trim(), cantidad, userEmail, colIndex - 21);
 }
 
 // Rellena/normaliza las columnas B (fecha) y C (hora) de REGISTRO a partir de la
@@ -662,4 +670,88 @@ function actualizarAnalisis() {
   analisis.getRange("N24").setValue(posicionesFaltantes);
   analisis.getRange("O24").setValue(posicionesSobrantes);
   analisis.getRange("M24").setValue(posicionesSobrantes + posicionesFaltantes);
+}
+
+// ==========================================
+// 8. MEDICIÓN DE TIEMPOS DE CONTEO  (hoja TIEMPOS)
+// ==========================================
+// Modelo: la Terminal WMS marca el INICIO cuando el operario empieza a contar
+// una referencia/posición y el FIN al enviar el conteo. La duración se calcula
+// con el reloj del SERVIDOR (un solo reloj para todos, zona horaria Ecuador).
+
+// Clave única del inicio pendiente por operario + posición + referencia.
+function claveTiempo_(email, posicion, codigo) {
+  return "INI:" + email + "|" + (posicion || "") + "|" + (codigo || "");
+}
+
+// La Terminal llama a esto al ABRIR/empezar el conteo de una referencia.
+function marcarInicioConteo(codigo, posicion, cliente, userEmail) {
+  try {
+    userEmail = userEmail || Session.getActiveUser().getEmail() || "SIN_USUARIO";
+    const datos = { ts: Date.now(), cliente: cliente || "" };
+    CacheService.getScriptCache().put(claveTiempo_(userEmail, posicion, codigo), JSON.stringify(datos), 21600); // 6 h
+    return { exito: true };
+  } catch (e) {
+    console.error('marcarInicioConteo: ' + e);
+    return { exito: false, mensaje: String(e) };
+  }
+}
+
+// Se llama al ENVIAR/registrar el conteo. Calcula la duración desde el inicio
+// marcado y escribe una fila en la hoja TIEMPOS.
+function registrarFinConteo(codigo, posicion, cliente, unidades, userEmail, tipoConteo) {
+  try {
+    userEmail = userEmail || Session.getActiveUser().getEmail() || "SIN_USUARIO";
+    const operario = USUARIOS_MAP[userEmail] || (String(userEmail).split('@')[0] || "Operador");
+    const cache = CacheService.getScriptCache();
+    const clave = claveTiempo_(userEmail, posicion, codigo);
+    const tz = "America/Guayaquil";
+
+    const fin = new Date();
+    let inicio = null, durSeg = "", valido = false;
+    const raw = cache.get(clave);
+    if (raw) {
+      try {
+        const d = JSON.parse(raw);
+        inicio = new Date(d.ts);
+        if (!cliente) cliente = d.cliente || "";
+        durSeg = Math.round((fin.getTime() - d.ts) / 1000);
+        valido = (durSeg >= 0 && durSeg <= PAUSA_MAX_MIN * 60); // descarta pausas largas
+      } catch (e) {}
+      cache.remove(clave); // el inicio se consume una sola vez
+    }
+
+    const uds = parseFloat(unidades) || 0;
+    const undMin = (valido && durSeg > 0) ? Math.round((uds / (durSeg / 60)) * 100) / 100 : "";
+
+    const hoja = obtenerHojaTiempos(SpreadsheetApp.getActiveSpreadsheet());
+    hoja.appendRow([
+      inicio ? Utilities.formatDate(inicio, tz, "dd/MM/yy") : "",
+      inicio ? Utilities.formatDate(inicio, tz, "HH:mm:ss") : "",
+      Utilities.formatDate(fin, tz, "dd/MM/yy"),
+      Utilities.formatDate(fin, tz, "HH:mm:ss"),
+      operario, cliente || "", codigo || "", posicion || "",
+      durSeg, uds, undMin,
+      valido ? "SI" : "NO",
+      tipoConteo || ""
+    ]);
+    return { exito: true, duracionSeg: durSeg, valido: valido };
+  } catch (e) {
+    console.error('registrarFinConteo: ' + e);
+    return { exito: false, mensaje: String(e) };
+  }
+}
+
+function obtenerHojaTiempos(ss) {
+  let h = ss.getSheetByName(TIEMPOS_SHEET);
+  if (!h) {
+    h = ss.insertSheet(TIEMPOS_SHEET);
+    h.appendRow([
+      "FECHA INICIO", "HORA INICIO", "FECHA FIN", "HORA FIN", "OPERARIO", "CLIENTE",
+      "REFERENCIA", "POSICION", "DURACION_SEG", "UNIDADES", "UND_POR_MIN", "VALIDO", "TIPO_CONTEO"
+    ]);
+    h.setFrozenRows(1);
+    h.getRange("1:1").setFontWeight("bold");
+  }
+  return h;
 }
