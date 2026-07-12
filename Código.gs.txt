@@ -91,48 +91,119 @@ function manejadorCambiosExternos(e) {
 // ==========================================
 // 3. PROTECCIONES MANUALES EN EL ARCHIVO
 // ==========================================
+// ==========================================
+// 3. BLINDAJE Y PROTECCIÓN ESTRICTA (onEdit)
+// ==========================================
 function onEdit(e) {
   try {
     if (!e || !e.range) return;
-    const sheet = e.range.getSheet(), name = sheet.getName(), row = e.range.getRow(), col = e.range.getColumn();
-    if (row < 2) return;
+    const sheet = e.range.getSheet();
+    const name = sheet.getName();
+    const row = e.range.getRow();
+    const col = e.range.getColumn();
+    const ui = SpreadsheetApp.getUi();
+    
+    // Extraer las dimensiones del rango que el usuario está editando/borrando
+    const numRows = e.range.getNumRows();
+    const numCols = e.range.getNumColumns();
+    const startCol = e.range.getColumn();
+    const endCol = e.range.getLastColumn();
 
+    // ⛔ REGLA 1: PROTECCIÓN DE ENCABEZADOS EN CUALQUIER HOJA
+    if (row === 1 || (row <= 1 && row + numRows - 1 >= 1)) {
+      ui.alert("⛔ PROTECCIÓN DE ENCABEZADOS\n\nNo se pueden modificar los encabezados para no afectar la conexión con Power BI.");
+      if (numRows === 1 && numCols === 1) e.range.setValue(e.oldValue || "");
+      return;
+    }
+
+    // ⛔ REGLA 2: PROTECCIÓN DE LA HOJA REGISTRO
     if (name === "REGISTRO") {
-       SpreadsheetApp.getUi().alert("⛔ ALERTA DE SEGURIDAD\n\nEl registro de auditoría es INALTERABLE.");
-       if (e.oldValue !== undefined) { e.range.setValue(e.oldValue); } else { e.range.clearContent(); }
+       ui.alert("⛔ ALERTA DE SEGURIDAD\n\nEl registro de auditoría es INALTERABLE por el usuario.");
+       if (numRows === 1 && numCols === 1 && e.oldValue !== undefined) { e.range.setValue(e.oldValue); } else { e.range.clearContent(); }
        return;
     }
 
+    // ⛔ REGLAS PARA "PLANILLA DE CONTEO FISICO"
     if (name === "PLANILLA DE CONTEO FISICO") {
-      // Proteger Columna B
-      if (col === 2) { 
-        if (e.value !== "" && e.value !== null && e.value !== undefined) {
-          SpreadsheetApp.getUi().alert("⛔ ACCIÓN DENEGADA\n\nLa Columna B es automática (Fecha del último registro).");
-          e.range.setValue(e.oldValue || ""); 
+      
+      // 🚨 NUEVO: INTERCEPTOR DE BORRADO/EDICIÓN MASIVA (Múltiples celdas)
+      if (numRows > 1 || numCols > 1) {
+        let tocaZonaProtegida = false;
+        
+        // Verificamos si el borrado masivo toca alguna columna prohibida
+        if (startCol <= 3 && endCol >= 1) tocaZonaProtegida = true;   // A, B, C (Fechas, ID)
+        if (startCol <= 21 && endCol >= 18) tocaZonaProtegida = true; // R, S, T, U (Fórmulas)
+        if (startCol <= 24 && endCol >= 22) tocaZonaProtegida = true; // V, W, X (Conteos)
+        
+        if (tocaZonaProtegida) {
+          ui.alert("⛔ BORRADO MASIVO DENEGADO\n\nEl sistema prohíbe borrar o modificar varias celdas a la vez en áreas protegidas (Conteos, Fórmulas o Fechas).\n\n⚠️ URGENTE: Presiona 'CTRL + Z' (o el botón Deshacer) INMEDIATAMENTE para restaurar la información borrada.");
+          return; // Aborta cualquier otro proceso
         }
+      }
+
+      // Regla 3: Columna B (Fecha automática) - Evaluación de una celda
+      if (col === 2 && numRows === 1 && numCols === 1) { 
+        ui.alert("⛔ ACCIÓN DENEGADA\n\nLa Columna B es administrada automáticamente por el sistema.");
+        e.range.setValue(e.oldValue || ""); 
         return;
       }
 
-      // Si alguien edita A2 o C2 a mano, lo copiamos abajo
-      if (row === 2 && (col === 1 || col === 3)) {
-        actualizarColumnasAC(sheet);
+      // Regla 4: Columnas A y C (Solo fila 2) - Evaluación de una celda
+      if ((col === 1 || col === 3) && row >= 3 && numRows === 1 && numCols === 1) {
+        ui.alert("⛔ ACCIÓN DENEGADA\n\nNo puedes editar estas columnas. El sistema las replica automáticamente desde la fila 2.");
+        e.range.setValue(e.oldValue || "");
+        return;
+      }
+
+      // Regla 5: Columnas de Fórmulas R, S, T, U - Evaluación de una celda
+      if (col >= 18 && col <= 21 && numRows === 1 && numCols === 1) {
+        ui.alert("⛔ ACCIÓN DENEGADA\n\nEstas columnas contienen fórmulas y están bloqueadas para evitar daños en los cálculos.");
+        e.range.setValue(e.oldValue || "");
         return;
       }
       
-      // Proteger modificación manual de conteos (V, W, X)
-      if ([22, 23, 24].includes(col)) {
+      // Regla 6: Columnas V, W, X (Conteos) - Evaluación de una celda
+      if (col >= 22 && col <= 24 && numRows === 1 && numCols === 1) {
+        
+        // Evitar que borren o cambien un número ya escrito
         if (e.oldValue !== undefined && e.oldValue !== "" && e.value !== e.oldValue) {
-           SpreadsheetApp.getUi().alert(`⛔ CONTEO CERRADO\nNo se pueden modificar conteos registrados.`);
-           e.range.setValue(e.oldValue); return;
+           ui.alert(`⛔ CONTEO CERRADO\nNo se pueden borrar ni modificar conteos ya registrados.`);
+           e.range.setValue(e.oldValue); 
+           return;
         }
-        // Si alguien hizo un conteo a mano en el Excel, lo auditamos y disparamos la actualización
-        registrarAccionManual(e, sheet, row, col);
-        manejadorCambiosExternos({changeType: 'EDIT'}); 
+        
+        // Si ingresan un conteo por primera vez de forma manual
+        if (e.value) {
+          registrarAccionManual(e, sheet, row, col);
+          manejadorCambiosExternos({changeType: 'EDIT'}); 
+        }
       }
     }
+
+    // ⛔ REGLAS PARA "PLANILLA DE SERIES FISICAS"
+    if (name === "PLANILLA DE SERIES FISICAS" || name === "PLANILLA SERIES") {
+      
+      // Interceptor de borrado masivo para las series
+      if (numRows > 1 || numCols > 1) {
+         if (startCol <= 6 && endCol >= 3) {
+            ui.alert("⛔ BORRADO MASIVO DENEGADO\n\nEstás intentando borrar fórmulas masivamente.\n\n⚠️ Presiona 'CTRL + Z' (Deshacer) INMEDIATAMENTE para restaurarlas.");
+            return;
+         }
+      }
+
+      // Regla 7: Columnas C, D, E, F (Fórmulas) - Evaluación de una celda
+      if (col >= 3 && col <= 6 && numRows === 1 && numCols === 1) {
+        ui.alert("⛔ ACCIÓN DENEGADA\n\nEstas columnas contienen fórmulas y no pueden ser editadas por el operario.");
+        e.range.setValue(e.oldValue || "");
+        return;
+      }
+      
+      // Regenerar secuencia en A si escriben en otras celdas
+      generarSecuenciaSeriesFisicas(sheet);
+    }
+
   } catch (error) {}
 }
-
 // ==========================================
 // 4. FUNCIONES DE ACTUALIZACIÓN (A, B, C, D, F)
 // ==========================================
