@@ -103,9 +103,6 @@ function manejadorCambiosExternos(e) {
 
 
 // ==========================================
-// 3. PROTECCIONES MANUALES EN EL ARCHIVO
-// ==========================================
-// ==========================================
 // 3. BLINDAJE Y PROTECCIÓN ESTRICTA (onEdit)
 // ==========================================
 function onEdit(e) {
@@ -124,7 +121,8 @@ function onEdit(e) {
     const endCol = e.range.getLastColumn();
 
     // ⛔ REGLA 1: PROTECCIÓN DE ENCABEZADOS EN CUALQUIER HOJA
-    if (row === 1 || (row <= 1 && row + numRows - 1 >= 1)) {
+    // (getRow() devuelve la fila superior del rango: si es 1, toca el encabezado)
+    if (row === 1) {
       ui.alert("⛔ PROTECCIÓN DE ENCABEZADOS\n\nNo se pueden modificar los encabezados para no afectar la conexión con Power BI.");
       if (numRows === 1 && numCols === 1) e.range.setValue(e.oldValue || "");
       return;
@@ -437,17 +435,29 @@ function registrarAuditoria(sheet, row, cantidad, colIndex, obs, userEmail) {
   }
 }
 
-function procesarEdicionRegistro(sheet, row) {
-  const ts = sheet.getRange(row, 1).getValue();
-  if (ts instanceof Date) {
-    const tz = "America/Guayaquil";
-    sheet.getRange(row, 2).setValue(Utilities.formatDate(ts, tz, "dd/MM/yy"));
-    sheet.getRange(row, 3).setValue(Utilities.formatDate(ts, tz, "HH:mm:ss"));
+// Rellena/normaliza las columnas B (fecha) y C (hora) de REGISTRO a partir de la
+// fecha real en la columna A, en zona horaria de Ecuador. Lee y escribe por lotes,
+// y solo reescribe si hay algo que corregir (evita gasto de cuota).
+function actualizarRegistro() {
+  const s = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("REGISTRO");
+  if (!s || s.getLastRow() < 2) return;
+
+  const tz = "America/Guayaquil";
+  const n = s.getLastRow() - 1;
+  const colA = s.getRange(2, 1, n, 1).getValues();
+  const bc = s.getRange(2, 2, n, 2).getValues();
+  let cambiado = false;
+
+  for (let i = 0; i < n; i++) {
+    const ts = colA[i][0];
+    if (ts instanceof Date) {
+      const f = Utilities.formatDate(ts, tz, "dd/MM/yy");
+      const h = Utilities.formatDate(ts, tz, "HH:mm:ss");
+      if (bc[i][0] !== f || bc[i][1] !== h) { bc[i][0] = f; bc[i][1] = h; cambiado = true; }
+    }
   }
-}
-function actualizarRegistro(){ 
-  const s = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("REGISTRO"); 
-  if(s){ for(let i=2; i<=s.getLastRow(); i++) procesarEdicionRegistro(s,i); } 
+
+  if (cambiado) s.getRange(2, 2, n, 2).setValues(bc);
 }
 
 // ==========================================
@@ -466,7 +476,7 @@ function actualizarAnalisis() {
   const codigosUnicos = new Set(), posicionesUnicas = new Set();
   const codigosEstado = {}, posicionesEstado = {};
 
-  let sumQ = 0, sumR = 0, unidadesCorrectas = 0, totalSobrantes = 0, totalFaltantes = 0;
+  let sumQ = 0, unidadesCorrectas = 0, totalSobrantes = 0, totalFaltantes = 0;
   
   for (const row of values) {
     const codigo = row[6];
@@ -484,7 +494,6 @@ function actualizarAnalisis() {
     codigosUnicos.add(codigo);
     if (posicion) posicionesUnicas.add(posicion);
     sumQ += qVal;
-    sumR += rVal;
 
     if (resultado === "CORRECTO") { unidadesCorrectas += rVal; } 
     else if (resultado === "SOBRANTE") { unidadesCorrectas += qVal; totalSobrantes += Math.max(0, rVal - qVal); } 
