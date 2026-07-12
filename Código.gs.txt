@@ -16,6 +16,10 @@ const USUARIOS_MAP = {
 // Reemplaza al antiguo ABC2026.txt de Google Drive.
 const ABC_MASTER_ID = "1Cq2AqRVAZJYmj_zs_zg8C63FPrgRBtJHaNcHWXygaPk";
 const ABC_MASTER_SHEET = "CRONOGRAMA_CODIGOS";
+const ABC_TXT_FALLBACK = "ABC2026.txt"; // respaldo si la hoja maestra no es accesible
+
+// Hoja oculta donde se respaldan las columnas protegidas para poder restaurarlas
+const RESP_SHEET = "_RESP_WMS";
 
 // ==========================================
 // 1. MENÚ PRINCIPAL DEL ARCHIVO HIJO
@@ -26,7 +30,7 @@ function onOpen() {
     .addSeparator()
     .addItem(' Forzar ', 'forzarInicializacionManual')
     .addItem(' Actualizar Análisis', 'actualizarAnalisis')
-    .addItem(' Actualizar ABC', 'consolidarDatos')
+    .addItem(' Actualizar ABC', 'actualizarABCManual')
     .addToUi();
 }
 
@@ -94,6 +98,9 @@ function manejadorCambiosExternos(e) {
     // Actualiza los cálculos y la hoja de Análisis
     actualizarAnalisis();
 
+    // Guarda el estado bueno de las columnas protegidas (para poder restaurarlas)
+    respaldarProtegidas(sheet);
+
   } catch(err) {
     console.error('manejadorCambiosExternos: ' + err);
   } finally {
@@ -138,17 +145,19 @@ function onEdit(e) {
     // ⛔ REGLAS PARA "PLANILLA DE CONTEO FISICO"
     if (name === "PLANILLA DE CONTEO FISICO") {
       
-      // 🚨 NUEVO: INTERCEPTOR DE BORRADO/EDICIÓN MASIVA (Múltiples celdas)
+      // 🚨 INTERCEPTOR DE BORRADO/EDICIÓN MASIVA (varias celdas)
+      // Ya no depende de CTRL+Z: el sistema RESTAURA automáticamente desde el respaldo.
       if (numRows > 1 || numCols > 1) {
         let tocaZonaProtegida = false;
-        
-        // Verificamos si el borrado masivo toca alguna columna prohibida
-        if (startCol <= 3 && endCol >= 1) tocaZonaProtegida = true;   // A, B, C (Fechas, ID)
+        if (startCol <= 4 && endCol >= 1) tocaZonaProtegida = true;   // A, B, C, D (Fechas, ID, secuencia)
         if (startCol <= 21 && endCol >= 18) tocaZonaProtegida = true; // R, S, T, U (Fórmulas)
         if (startCol <= 24 && endCol >= 22) tocaZonaProtegida = true; // V, W, X (Conteos)
-        
+
         if (tocaZonaProtegida) {
-          ui.alert("⛔ BORRADO MASIVO DENEGADO\n\nEl sistema prohíbe borrar o modificar varias celdas a la vez en áreas protegidas (Conteos, Fórmulas o Fechas).\n\n⚠️ URGENTE: Presiona 'CTRL + Z' (o el botón Deshacer) INMEDIATAMENTE para restaurar la información borrada.");
+          const restaurado = restaurarProtegidas(sheet);
+          ui.alert(restaurado
+            ? "⛔ EDICIÓN MASIVA DENEGADA\n\n✅ El sistema RESTAURÓ automáticamente los datos protegidos (Conteos, Fórmulas y Fechas). No se perdió información."
+            : "⛔ EDICIÓN MASIVA DENEGADA\n\nNo modifique varias celdas a la vez en áreas protegidas.\n\n⚠️ Presione 'CTRL + Z' para restaurar.");
           return; // Aborta cualquier otro proceso
         }
       }
@@ -163,6 +172,13 @@ function onEdit(e) {
       // Regla 4: Columnas A y C (Solo fila 2) - Evaluación de una celda
       if ((col === 1 || col === 3) && row >= 3 && numRows === 1 && numCols === 1) {
         ui.alert("⛔ ACCIÓN DENEGADA\n\nNo puedes editar estas columnas. El sistema las replica automáticamente desde la fila 2.");
+        e.range.setValue(e.oldValue || "");
+        return;
+      }
+
+      // Regla 4b: Columna D (secuencia automática) - Evaluación de una celda
+      if (col === 4 && numRows === 1 && numCols === 1) {
+        ui.alert("⛔ ACCIÓN DENEGADA\n\nLa Columna D (secuencia) es administrada automáticamente por el sistema.");
         e.range.setValue(e.oldValue || "");
         return;
       }
@@ -303,42 +319,72 @@ function verificarYActualizarColumnaB(sheet) {
   }
 }
 
-// Construye el mapa CODIGO -> ABC leyendo la hoja matriz "CRONOGRAMA_CODIGOS"
-// del archivo "CONTEOS CICLICOS ITSANET" (columna B = CODIGO, columna C = ABC).
-// Cachea el resultado 6 h para no releer el archivo maestro en cada ciclo.
-function obtenerMapaABC() {
-  const cache = CacheService.getScriptCache();
-  const cached = cache.get('WMS_ABC_MAP');
-  if (cached) {
-    try { return JSON.parse(cached); } catch (e) {}
+// Lee el mapa CODIGO -> ABC desde la hoja maestra "CRONOGRAMA_CODIGOS"
+// (columna B = CODIGO, columna C = ABC). La PROTECCIÓN de la hoja NO impide la
+// lectura: solo se necesita acceso de Lector al archivo maestro. Devuelve null
+// si no se pudo leer (permisos/errores) o si no hay datos.
+function leerMapaDesdeHoja() {
+  try {
+    const master = SpreadsheetApp.openById(ABC_MASTER_ID);
+    const hoja = master.getSheetByName(ABC_MASTER_SHEET);
+    if (!hoja) return null;
+    const lr = hoja.getLastRow();
+    if (lr < 2) return null;
+    const datos = hoja.getRange(2, 2, lr - 1, 2).getValues(); // B (CODIGO) y C (ABC)
+    const mapa = {};
+    datos.forEach(fila => {
+      const cod = String(fila[0]).trim();
+      if (cod) mapa[cod] = String(fila[1]).trim();
+    });
+    return Object.keys(mapa).length ? mapa : null;
+  } catch (e) {
+    console.error('leerMapaDesdeHoja: ' + e);
+    return null;
   }
-
-  const master = SpreadsheetApp.openById(ABC_MASTER_ID);
-  const hoja = master.getSheetByName(ABC_MASTER_SHEET);
-  if (!hoja) return null;
-  const lr = hoja.getLastRow();
-  if (lr < 2) return {};
-
-  const datos = hoja.getRange(2, 2, lr - 1, 2).getValues(); // B (CODIGO) y C (ABC)
-  const mapa = {};
-  datos.forEach(fila => {
-    const cod = String(fila[0]).trim();
-    if (cod) mapa[cod] = String(fila[1]).trim();
-  });
-
-  try { cache.put('WMS_ABC_MAP', JSON.stringify(mapa), 21600); } catch (e) {}
-  return mapa;
 }
 
-function consolidarDatos(sheet) {
+// Respaldo: lee el mapa desde el archivo ABC2026.txt (JSON) de Google Drive.
+function leerMapaDesdeTxt() {
+  try {
+    const f = DriveApp.getFilesByName(ABC_TXT_FALLBACK);
+    if (!f.hasNext()) return null;
+    const json = JSON.parse(f.next().getBlob().getDataAsString("UTF-8").replace(/^﻿/, ""));
+    return (json && Object.keys(json).length) ? json : null;
+  } catch (e) {
+    console.error('leerMapaDesdeTxt: ' + e);
+    return null;
+  }
+}
+
+// Fuente principal: hoja maestra. Si falla o viene vacía, usa ABC2026.txt.
+// Cachea 6 h SOLO cuando obtuvo catálogo (nunca cachea vacío). forzar=true relee.
+function obtenerMapaABC(forzar) {
+  const cache = CacheService.getScriptCache();
+  if (forzar) {
+    cache.remove('WMS_ABC_MAP');
+  } else {
+    const cached = cache.get('WMS_ABC_MAP');
+    if (cached) { try { return JSON.parse(cached); } catch (e) {} }
+  }
+
+  let mapa = leerMapaDesdeHoja();        // 1) hoja maestra (fuente principal)
+  if (!mapa) mapa = leerMapaDesdeTxt();  // 2) respaldo ABC2026.txt
+
+  if (mapa && Object.keys(mapa).length) {
+    try { cache.put('WMS_ABC_MAP', JSON.stringify(mapa), 21600); } catch (e) {}
+  }
+  return mapa || {};
+}
+
+function consolidarDatos(sheet, forzar) {
   try {
     if (!sheet) sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PLANILLA DE CONTEO FISICO");
     if (!sheet) return;
     const lr = sheet.getLastRow();
     if (lr < 2) return;
 
-    const mapa = obtenerMapaABC();
-    if (!mapa) return;
+    const mapa = obtenerMapaABC(forzar);
+    if (!mapa || !Object.keys(mapa).length) return; // sin catálogo: no se toca F
 
     const vals = sheet.getRange(2, 7, lr - 1, 1).getValues()
       .map(r => [mapa[String(r[0]).trim()] || ""]);
@@ -346,6 +392,12 @@ function consolidarDatos(sheet) {
   } catch (e) {
     console.error('consolidarDatos: ' + e);
   }
+}
+
+// Acción del menú "Actualizar ABC": fuerza relectura del catálogo (ignora caché).
+function actualizarABCManual() {
+  consolidarDatos(null, true);
+  SpreadsheetApp.getUi().alert("✅ ABC actualizado (hoja maestra, con respaldo ABC2026.txt).");
 }
 
 function forzarInicializacionManual() {
@@ -356,8 +408,82 @@ function forzarInicializacionManual() {
     verificarYActualizarColumnaB(sheet);
     consolidarDatos(sheet);
     actualizarAnalisis();
+    respaldarProtegidas(sheet); // deja una copia base de las columnas protegidas
   }
   SpreadsheetApp.getUi().alert("✅ Datos Inicializados y Sincronizados.");
+}
+
+// ==========================================
+// 4.b RESPALDO / RESTAURACIÓN DE COLUMNAS PROTEGIDAS
+// (permite reponer datos si el usuario borra una o varias celdas)
+// ==========================================
+function obtenerHojaRespaldo(ss) {
+  let h = ss.getSheetByName(RESP_SHEET);
+  if (!h) {
+    h = ss.insertSheet(RESP_SHEET);
+    h.hideSheet();
+    // Columnas de fórmulas (R-U → 5-8 del respaldo) como texto plano,
+    // para que las fórmulas se guarden literales y no se activen en el respaldo.
+    h.getRange(1, 5, h.getMaxRows(), 4).setNumberFormat("@");
+  }
+  return h;
+}
+
+// Copia A-D (valores), R-U (fórmulas literales) y V-X (valores) al respaldo.
+// MERGE de único registro: si el valor nuevo llega vacío, NUNCA borra el ya
+// respaldado. Así, aunque onChange corra sobre un estado recién borrado, el
+// respaldo conserva el dato para que onEdit pueda restaurarlo.
+function respaldarProtegidas(planilla) {
+  try {
+    const lr = planilla.getLastRow();
+    if (lr < 2) return;
+    const n = lr - 1;
+    const ad  = planilla.getRange(2, 1, n, 4).getValues();     // A,B,C,D
+    const rF  = planilla.getRange(2, 18, n, 4).getFormulas();  // R,S,T,U (fórmula)
+    const rV  = planilla.getRange(2, 18, n, 4).getValues();    // R,S,T,U (valor de respaldo)
+    const vwx = planilla.getRange(2, 22, n, 3).getValues();    // V,W,X
+    const ru  = rF.map((row, i) => row.map((f, j) => (f !== "" ? f : String(rV[i][j]))));
+
+    const bkp = obtenerHojaRespaldo(planilla.getParent());
+    const prev = Math.max(bkp.getLastRow() - 1, 0);
+    const pAD  = prev ? bkp.getRange(2, 1, prev, 4).getValues() : [];
+    const pRU  = prev ? bkp.getRange(2, 5, prev, 4).getValues() : [];
+    const pVWX = prev ? bkp.getRange(2, 9, prev, 3).getValues() : [];
+
+    // conserva el valor previo cuando el nuevo viene vacío
+    const keep = (nv, ov) => (String(nv == null ? "" : nv).trim() !== "" ? nv : (ov === undefined ? "" : ov));
+    const mAD  = ad.map((row, i)  => row.map((v, j) => keep(v, pAD[i]  && pAD[i][j])));
+    const mRU  = ru.map((row, i)  => row.map((v, j) => keep(v, pRU[i]  && pRU[i][j])));
+    const mVWX = vwx.map((row, i) => row.map((v, j) => keep(v, pVWX[i] && pVWX[i][j])));
+
+    bkp.getRange(2, 1, n, 4).setValues(mAD);
+    bkp.getRange(2, 5, n, 4).setValues(mRU);  // se guardan como texto (columnas @)
+    bkp.getRange(2, 9, n, 3).setValues(mVWX);
+  } catch (e) {
+    console.error('respaldarProtegidas: ' + e);
+  }
+}
+
+// Repone en la planilla las columnas protegidas desde el respaldo (deshace borrados).
+function restaurarProtegidas(planilla) {
+  try {
+    const bkp = obtenerHojaRespaldo(planilla.getParent());
+    if (bkp.getLastRow() < 2) return false;
+    const n = Math.min(bkp.getLastRow() - 1, planilla.getLastRow() - 1);
+    if (n < 1) return false;
+
+    const ad  = bkp.getRange(2, 1, n, 4).getValues();
+    const ru  = bkp.getRange(2, 5, n, 4).getValues(); // fórmulas/valores como texto
+    const vwx = bkp.getRange(2, 9, n, 3).getValues();
+
+    planilla.getRange(2, 1, n, 4).setValues(ad);
+    planilla.getRange(2, 18, n, 4).setValues(ru);  // al escribir en la planilla, "=" reactiva la fórmula
+    planilla.getRange(2, 22, n, 3).setValues(vwx);
+    return true;
+  } catch (e) {
+    console.error('restaurarProtegidas: ' + e);
+    return false;
+  }
 }
 
 // ==========================================
