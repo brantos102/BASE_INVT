@@ -95,9 +95,9 @@ function manejadorCambiosExternos(e) {
     verificarYActualizarColumnaB(sheet);  // Trae última fecha/hora de REGISTRO a Col B
     generarSecuenciaColumnaD(sheet);      // Genera secuencia D en base a G
 
-    // El ABC (F) se llama aquí si está vacío. (Si no, lo hará la rutina de fondo)
-    const f2 = sheet.getRange("F2").getValue();
-    if (!f2 || f2.toString().trim() === "") consolidarDatos(sheet);
+    // El ABC (F) se recalcula en CADA cambio para que aparezca al momento.
+    // Usa caché, así que no relee el archivo maestro en cada evento.
+    consolidarDatos(sheet);
 
     // Actualiza los cálculos y la hoja de Análisis
     actualizarAnalisis();
@@ -338,7 +338,8 @@ function leerMapaDesdeHoja() {
     const mapa = {};
     datos.forEach(fila => {
       const cod = String(fila[0]).trim();
-      if (cod) mapa[cod] = String(fila[1]).trim();
+      const abc = String(fila[1]).trim();
+      if (cod && abc) mapa[cod] = abc; // ignora códigos sin ABC (así el TXT los rellena)
     });
     return Object.keys(mapa).length ? mapa : null;
   } catch (e) {
@@ -360,8 +361,9 @@ function leerMapaDesdeTxt() {
   }
 }
 
-// Fuente principal: hoja maestra. Si falla o viene vacía, usa ABC2026.txt.
-// Cachea 6 h SOLO cuando obtuvo catálogo (nunca cachea vacío). forzar=true relee.
+// FUSIÓN de las dos fuentes: la hoja maestra manda y el ABC2026.txt rellena los
+// códigos/clientes que la hoja NO tiene (ej. HYCITE). Cachea 30 min (nunca cachea
+// vacío) para que lo automático refresque solo. forzar=true relee al momento.
 function obtenerMapaABC(forzar) {
   const cache = CacheService.getScriptCache();
   if (forzar) {
@@ -371,13 +373,14 @@ function obtenerMapaABC(forzar) {
     if (cached) { try { return JSON.parse(cached); } catch (e) {} }
   }
 
-  let mapa = leerMapaDesdeHoja();        // 1) hoja maestra (fuente principal)
-  if (!mapa) mapa = leerMapaDesdeTxt();  // 2) respaldo ABC2026.txt
+  const hoja = leerMapaDesdeHoja() || {}; // fuente principal
+  const txt  = leerMapaDesdeTxt()  || {}; // respaldo/complemento
+  const mapa = Object.assign({}, txt, hoja); // la hoja sobrescribe; el txt rellena huecos
 
-  if (mapa && Object.keys(mapa).length) {
-    try { cache.put('WMS_ABC_MAP', JSON.stringify(mapa), 21600); } catch (e) {}
+  if (Object.keys(mapa).length) {
+    try { cache.put('WMS_ABC_MAP', JSON.stringify(mapa), 1800); } catch (e) {} // 30 min
   }
-  return mapa || {};
+  return mapa;
 }
 
 function consolidarDatos(sheet, forzar) {
