@@ -32,9 +32,11 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚙️ Inventarios WMS ')
     .addItem(' ACTIVAR ARCHIVO ', 'instalarTriggersEnCopia')
     .addSeparator()
-    .addItem(' Forzar ', 'forzarInicializacionManual')
-    .addItem(' Actualizar Análisis', 'actualizarAnalisis')
-    .addItem(' Actualizar ABC', 'actualizarABCManual')
+    .addItem(' 🔄 Forzar TODO (Análisis + ABC + Registro)', 'forzarInicializacionManual')
+    .addSeparator()
+    .addItem(' 📊 Actualizar Análisis', 'menuActualizarAnalisis')
+    .addItem(' 🔤 Actualizar ABC', 'actualizarABCManual')
+    .addItem(' 🕒 Actualizar Registro', 'menuActualizarRegistro')
     .addToUi();
 }
 
@@ -401,10 +403,27 @@ function consolidarDatos(sheet, forzar) {
   }
 }
 
-// Acción del menú "Actualizar ABC": fuerza relectura del catálogo (ignora caché).
+// ==========================================
+// BOTONES MANUALES DEL MENÚ (los puede usar CUALQUIER operario/usuario)
+// No dependen de que el archivo esté "activado" ni restringen por usuario.
+// ==========================================
+
+// "Actualizar ABC": fuerza relectura del catálogo (ignora caché) y pinta la columna F.
 function actualizarABCManual() {
   consolidarDatos(null, true);
-  SpreadsheetApp.getUi().alert("✅ ABC actualizado (hoja maestra, con respaldo ABC2026.txt).");
+  SpreadsheetApp.getActiveSpreadsheet().toast("ABC actualizado (hoja maestra + respaldo ABC2026.txt).", "✅ WMS", 4);
+}
+
+// "Actualizar Análisis": recalcula la hoja ANALISIS al momento.
+function menuActualizarAnalisis() {
+  actualizarAnalisis();
+  SpreadsheetApp.getActiveSpreadsheet().toast("Análisis actualizado.", "✅ WMS", 4);
+}
+
+// "Actualizar Registro": normaliza fechas y horas de la hoja REGISTRO.
+function menuActualizarRegistro() {
+  actualizarRegistro();
+  SpreadsheetApp.getActiveSpreadsheet().toast("Registro (fechas y horas) actualizado.", "✅ WMS", 4);
 }
 
 function forzarInicializacionManual() {
