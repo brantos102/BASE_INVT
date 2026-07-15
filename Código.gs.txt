@@ -25,6 +25,10 @@ const RESP_SHEET = "_RESP_WMS";
 const TIEMPOS_SHEET = "TIEMPOS";
 const PAUSA_MAX_MIN = 10; // un hueco mayor a esto se considera pausa (no conteo real)
 
+// ABC: intervalo mínimo entre actualizaciones automáticas (aprox. 2 veces al día).
+// El botón "Actualizar ABC" sigue siendo instantáneo.
+const ABC_MIN_HORAS = 6;
+
 // ==========================================
 // 1. MENÚ PRINCIPAL DEL ARCHIVO HIJO
 // ==========================================
@@ -97,9 +101,9 @@ function manejadorCambiosExternos(e) {
     verificarYActualizarColumnaB(sheet);  // Trae última fecha/hora de REGISTRO a Col B
     generarSecuenciaColumnaD(sheet);      // Genera secuencia D en base a G
 
-    // El ABC (F) se recalcula en CADA cambio para que aparezca al momento.
-    // Usa caché, así que no relee el archivo maestro en cada evento.
-    consolidarDatos(sheet);
+    // El ABC (F) NO se recalcula en cada cambio: se actualiza automáticamente
+    // ~2 veces al día (rutina de fondo) y al instante con el botón "Actualizar ABC".
+    // Así se evita carga innecesaria y no se toca el formato condicional de F.
 
     // Actualiza los cálculos y la hoja de Análisis
     actualizarAnalisis();
@@ -380,7 +384,7 @@ function obtenerMapaABC(forzar) {
   const mapa = Object.assign({}, txt, hoja); // la hoja sobrescribe; el txt rellena huecos
 
   if (Object.keys(mapa).length) {
-    try { cache.put('WMS_ABC_MAP', JSON.stringify(mapa), 1800); } catch (e) {} // 30 min
+    try { cache.put('WMS_ABC_MAP', JSON.stringify(mapa), 21600); } catch (e) {} // 6 h
   }
   return mapa;
 }
@@ -397,7 +401,9 @@ function consolidarDatos(sheet, forzar) {
 
     const vals = sheet.getRange(2, 7, lr - 1, 1).getValues()
       .map(r => [mapa[String(r[0]).trim()] || ""]);
-    sheet.getRange(2, 6, vals.length, 1).setValues(vals); // Pega el ABC en la columna F
+    // setValues escribe SOLO valores: NO altera el formato condicional (colores A/B/C) de F
+    sheet.getRange(2, 6, vals.length, 1).setValues(vals);
+    PropertiesService.getScriptProperties().setProperty('WMS_ABC_LAST', Date.now().toString());
   } catch (e) {
     console.error('consolidarDatos: ' + e);
   }
@@ -410,20 +416,38 @@ function consolidarDatos(sheet, forzar) {
 
 // "Actualizar ABC": fuerza relectura del catálogo (ignora caché) y pinta la columna F.
 function actualizarABCManual() {
-  consolidarDatos(null, true);
-  SpreadsheetApp.getActiveSpreadsheet().toast("ABC actualizado (hoja maestra + respaldo ABC2026.txt).", "✅ WMS", 4);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    consolidarDatos(null, true);
+    ss.toast("ABC actualizado (hoja maestra + respaldo ABC2026.txt).", "✅ WMS", 4);
+  } catch (e) {
+    console.error('actualizarABCManual: ' + e);
+    ss.toast("No se pudo actualizar el ABC: " + e.message, "⚠️ WMS", 6);
+  }
 }
 
 // "Actualizar Análisis": recalcula la hoja ANALISIS al momento.
 function menuActualizarAnalisis() {
-  actualizarAnalisis();
-  SpreadsheetApp.getActiveSpreadsheet().toast("Análisis actualizado.", "✅ WMS", 4);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    actualizarAnalisis();
+    ss.toast("Análisis actualizado.", "✅ WMS", 4);
+  } catch (e) {
+    console.error('menuActualizarAnalisis: ' + e);
+    ss.toast("No se pudo actualizar el análisis: " + e.message, "⚠️ WMS", 6);
+  }
 }
 
 // "Actualizar Registro": normaliza fechas y horas de la hoja REGISTRO.
 function menuActualizarRegistro() {
-  actualizarRegistro();
-  SpreadsheetApp.getActiveSpreadsheet().toast("Registro (fechas y horas) actualizado.", "✅ WMS", 4);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    actualizarRegistro();
+    ss.toast("Registro (fechas y horas) actualizado.", "✅ WMS", 4);
+  } catch (e) {
+    console.error('menuActualizarRegistro: ' + e);
+    ss.toast("No se pudo actualizar el registro: " + e.message, "⚠️ WMS", 6);
+  }
 }
 
 function forzarInicializacionManual() {
@@ -541,7 +565,9 @@ function rutinaDeFondoMaestra() {
 
     // 2. MIENTRAS ESTÉ ACTIVO (Hay operarios trabajando)
     actualizarAnalisis();
-    consolidarDatos();
+    // ABC: solo si pasó el intervalo mínimo (aprox. 2 veces al día)
+    const ultimoABC = parseInt(prop.getProperty('WMS_ABC_LAST')) || 0;
+    if ((now - ultimoABC) >= ABC_MIN_HORAS * 3600000) consolidarDatos();
     actualizarRegistro();
   } catch (e) {
     console.error('rutinaDeFondoMaestra: ' + e);
@@ -606,7 +632,8 @@ function actualizarRegistro() {
 
   for (let i = 0; i < n; i++) {
     const ts = colA[i][0];
-    if (ts instanceof Date) {
+    // Solo fechas VÁLIDAS (una fecha corrupta hacía fallar formatDate y el botón)
+    if (ts instanceof Date && !isNaN(ts.getTime())) {
       const f = Utilities.formatDate(ts, tz, "dd/MM/yy");
       const h = Utilities.formatDate(ts, tz, "HH:mm:ss");
       if (bc[i][0] !== f || bc[i][1] !== h) { bc[i][0] = f; bc[i][1] = h; cambiado = true; }
